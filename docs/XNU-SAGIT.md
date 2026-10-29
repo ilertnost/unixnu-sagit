@@ -210,44 +210,52 @@ Six squares mean the bootstrap page tables, the MMU and the framebuffer mapping
 survived the handover; anything less is a boot-chain regression and the count
 tells which stage died.
 
-**Column of bars**, 320x30 at x=64, first bar at y=320, one bar per checkpoint,
-36 pixels per step, with six black rows between bars so the column reads as a
-stack of blocks. Bar `n` therefore ends at `y = 320 + (n+1)*36`: measure the
-bottom edge of the green/cyan stack and divide by 36, no counting required.
+**Column of bars**, 320x36 at x=64, first bar at y=320, one bar per checkpoint,
+45 pixels per step, with nine black rows between bars so the column reads as a
+stack of blocks. Bar `n` therefore ends at `y = 320 + (n+1)*45`: measure the
+bottom edge of the green/cyan stack and divide by 45, no counting required.
 Bars are green until `arm_vm_init()` replaces TTBR0 and cyan afterwards, which
-also says whether the post-handover framebuffer path works.
+also says whether the post-handover framebuffer path works. 35 checkpoints fit
+the screen; if one is added without shrinking the step, the last bar turns red
+instead of silently dropping bars, which would read as a hang.
 
 | Bar | Checkpoint |
 |---|---|
 | 0 | `arm_init()` entered |
 | 1 | image rebased and signed, constant boot args in place |
-| 2 | `cpu_bootstrap()` |
-| 3 | `rtclock_early_init()` |
-| 4 | `kernel_startup_bootstrap()` |
-| 5 | `timer_call_init()` |
-| 6 | `cpu_init()` |
-| 7 | `processor_bootstrap()` |
-| 8 | about to call `arm_vm_init()` |
-| 9 | `arm_vm_init()` entered |
-| 10 | memory geometry, physmap range decided |
-| 11 | `cpu_tte` and `invalid_tte` allocated |
-| 12 | kernel window mapped into the new tables |
-| 13 | Mach-O segments resolved |
-| 14 | `arm_vm_prot_init()` |
-| 15 | low globals mapped |
-| 16 | dynamic range mapped |
-| 17 | cpu counters, before the physmap |
-| 18 | TTBR0 replaced, KVA live (first cyan bar) |
-| 19 | `pmap_bootstrap()` |
-| 20 | `arm_vm_init()` done |
-| 21 | `arm_init()` after `arm_vm_init()` |
-| 22 | `PE_consistent_debug_inherit()` |
-| 23 | `serial_init()` |
-| 24 | `kernel_startup_initialize_upto(STARTUP_SUB_KPRINTF)` |
-| 25 | first `kprintf` |
-| 26 | `PE_create_console()` |
-| 27 | about to call `machine_startup()` |
-| 28 | screen acquired, kernel log takes over |
+| 2 | `PE_init_platform()` |
+| 3 | timer registers, WFE timeout, misc Apple registers |
+| 4 | `/chosen` lookup, page shift decided |
+| 5 | `ml_parse_cpu_topology()` |
+| 6 | boot cpu data and `CpuDataEntries` |
+| 7 | bootstrap thread created and installed |
+| 8 | `cpu_bootstrap()` |
+| 9 | `rtclock_early_init()` |
+| 10 | `kernel_startup_bootstrap()` |
+| 11 | `timer_call_init()` |
+| 12 | `cpu_init()` |
+| 13 | `processor_bootstrap()` |
+| 14 | about to call `arm_vm_init()` |
+| 15 | `arm_vm_init()` entered |
+| 16 | memory geometry, physmap range decided |
+| 17 | `cpu_tte` and `invalid_tte` allocated |
+| 18 | kernel window mapped into the new tables |
+| 19 | Mach-O segments resolved |
+| 20 | `arm_vm_prot_init()` |
+| 21 | low globals mapped |
+| 22 | dynamic range mapped |
+| 23 | cpu counters, before the physmap |
+| 24 | TTBR0 replaced, KVA live (first cyan bar) |
+| 25 | `pmap_bootstrap()` |
+| 26 | `arm_vm_init()` done |
+| 27 | `arm_init()` after `arm_vm_init()` |
+| 28 | `PE_consistent_debug_inherit()` |
+| 29 | `serial_init()` |
+| 30 | `kernel_startup_initialize_upto(STARTUP_SUB_KPRINTF)` |
+| 31 | first `kprintf` |
+| 32 | `PE_create_console()` |
+| 33 | about to call `machine_startup()` |
+| 34 | screen acquired, kernel log takes over |
 
 Three green squares at y=240, x=64/144/224, are a pre-flight check of the
 bootstrap tables, taken just before the MMU comes on: `AT S1E1R` translates an

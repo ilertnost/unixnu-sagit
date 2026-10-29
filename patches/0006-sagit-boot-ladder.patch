@@ -28,8 +28,55 @@
  	cpu_data_init(&BootCpuData);
  #if defined(HAS_APPLE_PAC)
  	/* bootstrap cpu process dependent key for kernel has been loaded by start.s */
-@@ -472,20 +479,32 @@
+@@ -372,6 +379,8 @@
+ 	PE_init_platform(FALSE, args); /* Get platform expert set up */
+ 	boot_progress_init();
+ 
++	sagit_step();		/* arm_init: PE_init_platform */
++
+ #if __arm64__
+ 	configure_timer_apple_regs();
+ 	wfe_timeout_configure();
+@@ -380,6 +389,8 @@
+ 	configure_misc_apple_boot_args();
+ 	configure_misc_apple_regs(true);
+ 
++	sagit_step();		/* arm_init: timer and misc registers */
++
+ #if (DEVELOPMENT || DEBUG)
+ 	unsigned long const *platform_stall_ptr = NULL;
+ 
+@@ -441,10 +452,14 @@
+ 	}
+ #endif
+ 
++	sagit_step();		/* arm_init: chosen node, page shift */
++
+ 	ml_parse_cpu_topology();
+ 
+ 
+ 	master_cpu = ml_get_boot_cpu_number();
++
++	sagit_step();		/* arm_init: cpu topology */
+ 	assert(master_cpu >= 0 && master_cpu <= ml_get_max_cpu_number());
+ 
+ 	BootCpuData.cpu_number = (unsigned short)master_cpu;
+@@ -458,6 +473,8 @@
+ 	    + ((uintptr_t)&BootCpuData
+ 	    - (uintptr_t)(args->virtBase)));
+ 
++	sagit_step();		/* arm_init: boot cpu data */
++
+ 	thread = thread_bootstrap();
+ 	thread->machine.CpuDatap = &BootCpuData;
+ 	thread->machine.pcpu_data_base = (vm_offset_t)0;
+@@ -470,22 +487,37 @@
+ 	 * preemption level is not really meaningful for the bootstrap thread.
+ 	 */
  	thread->machine.preemption_count = 0;
++
++	sagit_step();		/* arm_init: bootstrap thread */
++
  	cpu_bootstrap();
  
 +	sagit_step();		/* arm_init: cpu_bootstrap */
@@ -61,7 +108,7 @@
  	if (PE_parse_boot_argn("maxmem", &maxmem, sizeof(maxmem))) {
  		xmaxmem = (uint64_t) maxmem * (1024 * 1024);
  	} else if (PE_get_default("hw.memsize", &memsize, sizeof(memsize))) {
-@@ -531,6 +550,7 @@
+@@ -531,6 +563,7 @@
  	__builtin_arm_wsr("pan", 1);
  #endif  /* __ARM_PAN_AVAILABLE__ */
  
@@ -69,7 +116,7 @@
  	boot_progress_stage("arm_vm_init enter");
  	arm_vm_init(xmaxmem, args);
  	boot_progress_stage("arm_vm_init returned");
-@@ -539,16 +559,25 @@
+@@ -539,16 +572,25 @@
  		patch_low_glo();
  	}
  
@@ -95,7 +142,7 @@
  
  	serialmode = 0;
  	if (PE_parse_boot_argn("serial", &serialmode, sizeof(serialmode))) {
-@@ -590,6 +619,8 @@
+@@ -590,6 +632,8 @@
  	}
  	PE_create_console();
  
@@ -104,7 +151,7 @@
  	/* setup console output */
  	PE_init_printf(FALSE);
  
-@@ -667,6 +698,9 @@
+@@ -667,6 +711,9 @@
  	 * against string vulnerabilities
  	 */
  	__stack_chk_guard &= ~(0xFFULL << 8);
@@ -116,7 +163,7 @@
  
 --- a/osfmk/arm64/arm_vm_init.c
 +++ b/osfmk/arm64/arm_vm_init.c
-@@ -128,6 +128,189 @@
+@@ -128,6 +128,206 @@
  SECURITY_READ_ONLY_LATE(unsigned long) gT0Sz = T0SZ_BOOT;
  SECURITY_READ_ONLY_LATE(unsigned long) gT1Sz = T1SZ_BOOT;
  
@@ -160,12 +207,13 @@
 +#define SAGIT_BAR_X         64
 +#define SAGIT_BAR_Y         320
 +#define SAGIT_BAR_WIDTH     320
-+#define SAGIT_BAR_HEIGHT    30
-+#define SAGIT_BAR_STRIDE    36
-+#define SAGIT_BAR_MAX       40
++#define SAGIT_BAR_HEIGHT    36
++#define SAGIT_BAR_STRIDE    45
++#define SAGIT_BAR_MAX       35
 +
 +#define SAGIT_COLOR_BEFORE  0xFF00FF00      /* green: before the TTBR0 switch */
 +#define SAGIT_COLOR_AFTER   0xFF00FFFF      /* cyan: after it */
++#define SAGIT_COLOR_OVER    0xFFFF0000      /* red: more checkpoints than bars */
 +
 +static uint64_t sagit_ladder_fb;
 +static uint32_t sagit_ladder_row;
@@ -270,35 +318,51 @@
 +{
 +	uint64_t fb = sagit_ladder_fb;
 +	uint64_t fb_end = fb + sagit_ladder_bytes;
++	uint64_t base;
 +	unsigned index = sagit_bar_next;
++	uint32_t color = SAGIT_COLOR_BEFORE;
++	boolean_t overflow = FALSE;
 +
-+	if (!fb || !sagit_ladder_row || index >= SAGIT_BAR_MAX) {
++	if (!fb || !sagit_ladder_row) {
 +		return;
++	}
++
++	/*
++	 * Running out of column must not look like a hang at the last checkpoint,
++	 * so the last bar turns red instead.
++	 */
++	if (index >= SAGIT_BAR_MAX) {
++		index = SAGIT_BAR_MAX - 1;
++		overflow = TRUE;
++		color = SAGIT_COLOR_OVER;
 +	}
 +
 +	if (!sagit_kva_live) {
 +		/* V=P bootstrap map, framebuffer at its physical address. */
-+		sagit_bar_paint(fb, sagit_ladder_row, index, SAGIT_COLOR_BEFORE);
-+		sagit_bar_next = index + 1;
-+		return;
-+	}
-+
-+	if (gPhysSize != 0 && fb >= (uint64_t)gPhysBase &&
++		base = fb;
++	} else if (gPhysSize != 0 && fb >= (uint64_t)gPhysBase &&
 +	    fb_end <= (uint64_t)gPhysBase + gPhysSize) {
 +		/* The kernel physmap covers all of RAM, framebuffer included. */
-+		sagit_bar_paint(phystokv((vm_offset_t)fb), sagit_ladder_row, index,
-+		    SAGIT_COLOR_AFTER);
-+		sagit_bar_next = index + 1;
-+		return;
++		base = (uint64_t)phystokv((vm_offset_t)fb);
++		if (!overflow) {
++			color = SAGIT_COLOR_AFTER;
++		}
++	} else {
++		if (!sagit_ladder_map) {
++			sagit_ladder_map = ml_io_map_unmappable((vm_offset_t)fb,
++			    (vm_size_t)sagit_ladder_bytes, VM_WIMG_WCOMB);
++		}
++		if (!sagit_ladder_map) {
++			return;
++		}
++		base = sagit_ladder_map;
++		if (!overflow) {
++			color = SAGIT_COLOR_AFTER;
++		}
 +	}
 +
-+	if (!sagit_ladder_map) {
-+		sagit_ladder_map = ml_io_map_unmappable((vm_offset_t)fb,
-+		    (vm_size_t)sagit_ladder_bytes, VM_WIMG_WCOMB);
-+	}
-+	if (sagit_ladder_map) {
-+		sagit_bar_paint(sagit_ladder_map, sagit_ladder_row, index,
-+		    SAGIT_COLOR_AFTER);
++	sagit_bar_paint(base, sagit_ladder_row, index, color);
++	if (!overflow) {
 +		sagit_bar_next = index + 1;
 +	}
 +}
@@ -306,7 +370,7 @@
  /* 23543331 - step 1 of kext / kernel __TEXT and __DATA colocation is to move
   * all kexts before the kernel.  This is only for arm64 devices and looks
   * something like the following:
-@@ -1830,6 +2013,8 @@
+@@ -1830,6 +2030,8 @@
  	vm_offset_t      ptpage_vaddr;
  	vm_map_address_t dynamic_memory_begin;
  
@@ -315,7 +379,7 @@
  	/*
  	 * Get the virtual and physical kernel-managed memory base from boot_args.
  	 */
-@@ -1897,6 +2082,8 @@
+@@ -1897,6 +2099,8 @@
  #endif // ARM_LARGE_MEMORY
  #endif
  
@@ -324,7 +388,7 @@
  #if KASAN && !defined(ARM_LARGE_MEMORY)
  	/* add the KASAN stolen memory to the physmap */
  	dynamic_memory_begin = static_memory_end + (shadow_ptop - shadow_pbase);
-@@ -1970,6 +2157,8 @@
+@@ -1970,6 +2174,8 @@
  	real_avail_end = avail_end;
  #endif
  
@@ -333,7 +397,7 @@
  	/*
  	 * Initialize l1 and l2 page table pages :
  	 *   map physical memory at the kernel base virtual address
-@@ -1989,6 +2178,8 @@
+@@ -1989,6 +2195,8 @@
  #endif
  
  
@@ -342,7 +406,7 @@
  #if __ARM_KERNEL_PROTECT__
  	/* Expand the page tables to prepare for the EL0 mappings. */
  	arm_vm_expand_kernel_el0_mappings();
-@@ -2068,6 +2259,8 @@
+@@ -2068,6 +2276,8 @@
  	}
  
  	(void) PE_parse_boot_argn("use_contiguous_hint", &use_contiguous_hint, sizeof(use_contiguous_hint));
@@ -351,7 +415,7 @@
  	assert(segSizePRELINKTEXT < 0x03000000); /* 23355738 */
  
  	/* if one of the new segments is present, the other one better be as well */
-@@ -2103,6 +2296,8 @@
+@@ -2103,6 +2313,8 @@
  
  	arm_vm_prot_init(args);
  
@@ -360,7 +424,7 @@
  	/*
  	 * Initialize the page tables for the low globals:
  	 *   cover this address range:
-@@ -2115,6 +2310,8 @@
+@@ -2115,6 +2327,8 @@
  	*cpu_l2_tte = (kvtophys(ptpage_vaddr) & ARM_TTE_TABLE_MASK) | ARM_TTE_TYPE_TABLE | ARM_TTE_VALID | ARM_TTE_TABLE_PXN | ARM_TTE_TABLE_XN;
  	bzero((void *)ptpage_vaddr, ARM_PGBYTES);
  
@@ -369,7 +433,7 @@
  	/*
  	 * Initialize l2 page table pages :
  	 *   cover this address range:
-@@ -2134,6 +2331,8 @@
+@@ -2134,6 +2348,8 @@
  	init_ptpages(cpu_tte, dynamic_memory_begin, VM_MAX_KERNEL_ADDRESS, TRUE, ARM_DYNAMIC_TABLE_XN | ARM_TTE_TABLE_AP(ARM_TTE_TABLE_AP_USER_NA));
  #endif
  
@@ -378,7 +442,7 @@
  #if KASAN
  	/* record the extent of the physmap */
  	physmap_vbase = physmap_base;
-@@ -2145,6 +2344,8 @@
+@@ -2145,6 +2361,8 @@
  	mt_early_init();
  #endif /* CONFIG_CPU_COUNTERS */
  
@@ -387,7 +451,7 @@
  	arm_set_user_tbi();
  
  	arm_vm_physmap_init(args);
-@@ -2162,6 +2363,9 @@
+@@ -2162,6 +2380,9 @@
  	cpu_tte = (tt_entry_t*)(phystokv(cpu_ttep));
  	invalid_tte = (tt_entry_t*)(phystokv(invalid_ttep));
  
@@ -397,7 +461,7 @@
  	// From here on out, we're off the bootstrap translation tables.
  
  
-@@ -2255,6 +2459,8 @@
+@@ -2255,6 +2476,8 @@
  #endif
  	pmap_bootstrap(dynamic_memory_begin);
  
@@ -406,7 +470,7 @@
  	disable_preemption();
  
  	/*
-@@ -2378,6 +2584,7 @@
+@@ -2378,6 +2601,7 @@
  	pmap_static_allocations_done();
  #endif
  	first_avail = avail_start;
