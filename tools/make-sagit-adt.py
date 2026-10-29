@@ -30,7 +30,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DEVICE = ROOT / "xnu" / "sagit"
+DEVICE = ROOT / "kernel" / "sagit"
 DTS = DEVICE / "dts" / "sagit.dts"
 SOC_INCLUDE = DEVICE / "soc" / "msm8998" / "dts"
 DEFAULT_UNIXNU = Path(os.environ.get("UNIXNU_SRC", "/data/opencode/unixnu-src")) / "scripts"

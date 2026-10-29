@@ -1,0 +1,27 @@
+diff --git a/DarwinBootPkg/Driver/BootVideo.h b/DarwinBootPkg/Driver/BootVideo.h
+index 2bbb634..822f140 100644
+--- a/DarwinBootPkg/Driver/BootVideo.h
++++ b/DarwinBootPkg/Driver/BootVideo.h
+@@ -27,8 +27,20 @@ DarwinBootVideoFromGop (CONST EFI_GRAPHICS_OUTPUT_PROTOCOL *Gop, UINT64 Video[6]
+   if ((Gop->Mode->FrameBufferBase == 0) || (Gop->Mode->FrameBufferBase & 3) ||
+       (Gop->Mode->FrameBufferSize < Bytes) ||
+       (Gop->Mode->FrameBufferBase > MAX_UINT64 - Gop->Mode->FrameBufferSize)) { return EFI_COMPROMISED_DATA; }
+-  Video[0] = Gop->Mode->FrameBufferBase;
+-  Video[1] = 1;
++  //
++  // Bit 0 tells XNU that v_baseAddr is a physical address and must be mapped.
++  // video_console.c decides with
++  //   makeMapping = (kernel_map == VM_MAP_NULL) || (1 & v_baseAddr)
++  // and by the time PE_create_console runs, arm_vm_init has already created
++  // kernel_map. Without the tag XNU treats the physical address as a virtual
++  // one and the first kprintf faults on an unmapped page.
++  //
++  Video[0] = Gop->Mode->FrameBufferBase | 1;
++  //
++  // Text console. A non-zero v_display asks for the graphical progress
++  // indicator, which this board does not have artwork for.
++  //
++  Video[1] = 0;
+   Video[2] = RowBytes;
+   Video[3] = Info->HorizontalResolution;
+   Video[4] = Info->VerticalResolution;

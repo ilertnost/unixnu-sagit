@@ -27,7 +27,7 @@
 
 #define FDT_STORE_ADDRESS   0x83300000ULL
 #define PROBE_ADDRESS       0xE0000000ULL
-#define DIAG_WAIT_SECONDS   25
+#define DIAG_WAIT_SECONDS   10
 #define RAMDISK_SECTOR      512U
 
 STATIC CONST EFI_GUID  mStatusGuid = {
@@ -383,7 +383,7 @@ OnReadyToBoot (
     Print (L"(console clear failed: %r)\n", Status);
   }
 
-  Print (L"=== ADRENOLINE DIAG ===\n");
+  Print (L"=== SAGIT DIAG ===\n");
   PrintStatus ();
   PrintFdt ();
   PrintProbe ();
