@@ -1,0 +1,16 @@
+diff --git a/DarwinBootPkg/Driver/Entry.S b/DarwinBootPkg/Driver/Entry.S
+index a7a55c2..568dc32 100644
+--- a/DarwinBootPkg/Driver/Entry.S
++++ b/DarwinBootPkg/Driver/Entry.S
+@@ -9,6 +9,11 @@ ASM_FUNC(DarwinCurrentEl)
+ // PA (0 for none), x5=its size in bytes. EL1 only.
+ ASM_FUNC(DarwinEnter)
+   msr daifset, #15
++  // x4 is the boot_args v_baseAddr value, whose bit 0 is XNU's "this is a
++  // physical address" tag. The painter below treats x4 as an address, so the
++  // tag has to go first: leaving it in made every store land one byte off and
++  // turned the green bar magenta.
++  bic x4, x4, #7
+   // Paint the top 1/16 of the framebuffer green (BGRA 0xFF00FF00)
+   // before cache maintenance, MMU shutdown and the branch to the kernel.
+   cbz x4, 2f

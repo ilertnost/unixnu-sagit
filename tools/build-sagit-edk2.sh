@@ -28,16 +28,23 @@ REPO=$(cd "$HERE/.." && pwd)
 # The overlay is idempotent and touches nothing else in the core.
 ROOT="$ROOT" MU_BASECORE="$MU_BASECORE" "$HERE/apply-edk2-unixnu-overlay.sh"
 
-# DarwinBoot lives in the UniXNU checkout as a submodule and is vendored. One
-# change is ours: v_baseAddr must carry XNU's bit 0 so the kernel maps the
-# framebuffer instead of treating a physical address as a virtual one. See
-# docs/ADR-0006-usb-log-channel.md and docs/XNU-SAGIT.md.
+# DarwinBoot lives in the UniXNU checkout as a submodule and is vendored. Two
+# changes are ours. v_baseAddr must carry XNU's bit 0 so the kernel maps the
+# framebuffer instead of treating a physical address as a virtual one, and the
+# handoff bar painter must drop that tag before it uses the value as an
+# address. See docs/XNU-SAGIT.md.
 DARWINBOOT="$UNIXNU_SRC/drivers/DarwinBoot"
 if ! grep -q 'Bit 0 tells XNU that v_baseAddr is a physical address' \
      "$DARWINBOOT/DarwinBootPkg/Driver/BootVideo.h"; then
   echo "== darwinboot: physical framebuffer =="
   patch -s -d "$DARWINBOOT" -p1 --forward \
     < "$HERE/../patches/0004-darwinboot-physical-framebuffer.patch"
+fi
+if ! grep -q "XNU's \"this is a" \
+     "$DARWINBOOT/DarwinBootPkg/Driver/Entry.S"; then
+  echo "== darwinboot: handoff bar drops the address tag =="
+  patch -s -d "$DARWINBOOT" -p1 --forward \
+    < "$HERE/../patches/0005-darwinboot-handoff-bar-address.patch"
 fi
 
 export PATH="$TOOLCHAIN/bin:$PATH"

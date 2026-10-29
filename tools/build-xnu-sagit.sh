@@ -39,6 +39,16 @@ if ! grep -q 'A source-only board has no \[kernel.prelink\]' "$SRC/scripts/unixn
   git -C "$SRC" apply "$PATCHES/0003-unixnu-prelink-when-specified.patch"
 fi
 
+# The bring-up ladder is a device patch and has to be applied after every
+# shared XNU patch, because it inserts code in the middle of hunks those touch
+# (start.s bootstrap tables, arm_init's init sequence). The format-1 build
+# applies $SRC/patches/xnu/*.patch in filename order and skips what is already
+# applied, so a "zzzz-" name puts it last and keeps it idempotent.
+LADDER="$SRC/patches/xnu/zzzz-sagit-boot-ladder.patch"
+if ! cmp -s "$PATCHES/0006-sagit-boot-ladder.patch" "$LADDER"; then
+  install -m 0644 "$PATCHES/0006-sagit-boot-ladder.patch" "$LADDER"
+fi
+
 cd "$SRC"
 
 echo "== config =="

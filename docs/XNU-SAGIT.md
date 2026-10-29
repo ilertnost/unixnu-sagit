@@ -173,10 +173,39 @@ python3 tools/mksagit-payload.py \
   --args="-v -enable_kprintf_spam debug=0x14e"
 ```
 
-`DarwinBoot` fills `boot_args.Video` from GOP with `v_display = 1`, so
-`PE_create_console` initialises the graphics console and `initialize_screen`
-maps the framebuffer with `ml_io_map_unmappable` before `kernel_map` exists.
-The screen then behaves like a serial terminal: it is the kernel log.
+`DarwinBoot` fills `boot_args.Video` from GOP with bit 0 of `v_baseAddr` set,
+XNU's tag for "this is a physical address, map it yourself", and `v_display = 0`
+for the text console. `PE_create_console` then maps the framebuffer with
+`ml_io_map_unmappable`, and the screen behaves like a serial terminal: it is the
+kernel log.
+
+### Bring-up ladder
+
+Text only appears in `kernel_bootstrap()`, after `initialize_screen(NULL,
+kPEAcquireScreen)`; `PE_create_console` merely prepares the console. A fault
+anywhere between the loader's branch and that point is therefore silent. The
+kernel paints a checkpoint square into the handoff framebuffer at each stage
+instead (`patches/0006-sagit-boot-ladder.patch`, installed as
+`patches/xnu/zzzz-sagit-boot-ladder.patch` in the UniXNU tree so that it is
+applied after every shared patch):
+
+| Stage | Square | Where |
+|---|---|---|
+| 0 | white | `start_first_cpu`, stacks ready, MMU off |
+| 1 | blue | after both bootstrap maps are built, MMU off |
+| 2 | green | MMU on, about to enter `arm_init()` |
+| 3 | cyan | first statement of `arm_init()` |
+| 4 | magenta | `arm_vm_init()` returned |
+| 5 | yellow | `PE_create_console()` returned |
+| 6 | red | end of `arm_init()`, before `machine_startup()` |
+| 7 | orange | screen acquired |
+
+The squares are 48x48 at y=140, x=8+stage*56, so the count of squares is the
+number of stages reached: a missing square is the first checkpoint that did not
+run. The painter uses `boot_args.Video[0]` as a physical address (valid with the
+MMU off and under the V=P bootstrap map) and translates it through
+`gVirtBase`/`gPhysBase` once `arm_vm_init()` has installed the linear window,
+cleaning the cache lines because the display controller scans DRAM directly.
 
 A real terminal over USB is ADR-0006.
 

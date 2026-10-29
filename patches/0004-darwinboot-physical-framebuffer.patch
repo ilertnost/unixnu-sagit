@@ -1,5 +1,5 @@
 diff --git a/DarwinBootPkg/Driver/BootVideo.h b/DarwinBootPkg/Driver/BootVideo.h
-index 2bbb634..822f140 100644
+index 2bbb634..db6a8fd 100644
 --- a/DarwinBootPkg/Driver/BootVideo.h
 +++ b/DarwinBootPkg/Driver/BootVideo.h
 @@ -27,8 +27,20 @@ DarwinBootVideoFromGop (CONST EFI_GRAPHICS_OUTPUT_PROTOCOL *Gop, UINT64 Video[6]
@@ -18,8 +18,8 @@ index 2bbb634..822f140 100644
 +  //
 +  Video[0] = Gop->Mode->FrameBufferBase | 1;
 +  //
-+  // Text console. A non-zero v_display asks for the graphical progress
-+  // indicator, which this board does not have artwork for.
++  // Text console. A non-zero v_display selects kPEGraphicsMode, which the
++  // board has no progress artwork for.
 +  //
 +  Video[1] = 0;
    Video[2] = RowBytes;
