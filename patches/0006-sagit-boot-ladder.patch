@@ -163,7 +163,7 @@
  
 --- a/osfmk/arm64/arm_vm_init.c
 +++ b/osfmk/arm64/arm_vm_init.c
-@@ -128,6 +128,206 @@
+@@ -128,6 +128,211 @@
  SECURITY_READ_ONLY_LATE(unsigned long) gT0Sz = T0SZ_BOOT;
  SECURITY_READ_ONLY_LATE(unsigned long) gT1Sz = T1SZ_BOOT;
  
@@ -186,10 +186,11 @@
 + * colour, because a photograph of a dim screen cannot tell magenta from purple
 + * but can tell how far down a column of green bars reaches:
 + *
-+ *   one 320x30 bar per checkpoint, starting at (64, 320), 36 pixels per step,
-+ *   green until TTBR0 is replaced, cyan afterwards. The bar index of the last
-+ *   painted band times 36 plus 320 is the y of its bottom edge, so a photo
-+ *   only has to be measured, not counted.
++ *   one 320x36 bar per checkpoint, first bar at (64, 320), 45 pixels per step,
++ *   twenty-one rows per column, second column 48 pixels to the right of the
++ *   first; green until TTBR0 is replaced, cyan afterwards. Bar n sits at
++ *   y = 320 + (n mod 21) * 45 in column n / 21, so a photo only has to be
++ *   measured, not counted.
 + *
 + * Three ways to reach the framebuffer, in order of the handover:
 + *   - before arm_vm_init() takes gVirtBase away, the V=P bootstrap map still
@@ -209,7 +210,9 @@
 +#define SAGIT_BAR_WIDTH     320
 +#define SAGIT_BAR_HEIGHT    36
 +#define SAGIT_BAR_STRIDE    45
-+#define SAGIT_BAR_MAX       35
++#define SAGIT_BAR_ROWS      21
++#define SAGIT_BAR_COLUMNS   2
++#define SAGIT_BAR_MAX       (SAGIT_BAR_ROWS * SAGIT_BAR_COLUMNS)
 +
 +#define SAGIT_COLOR_BEFORE  0xFF00FF00      /* green: before the TTBR0 switch */
 +#define SAGIT_COLOR_AFTER   0xFF00FFFF      /* cyan: after it */
@@ -276,12 +279,14 @@
 +{
 +	uint64_t y, x;
 +	uint64_t origin;
++	unsigned column = index / SAGIT_BAR_ROWS;
++	unsigned row_index = index % SAGIT_BAR_ROWS;
 +
 +	if (!fb || !row_bytes || index >= SAGIT_BAR_MAX) {
 +		return;
 +	}
-+	origin = fb + (uint64_t)(SAGIT_BAR_Y + index * SAGIT_BAR_STRIDE) * row_bytes
-+	    + (uint64_t)SAGIT_BAR_X * 4;
++	origin = fb + (uint64_t)(SAGIT_BAR_Y + row_index * SAGIT_BAR_STRIDE) * row_bytes
++	    + (uint64_t)(SAGIT_BAR_X + column * (SAGIT_BAR_WIDTH + 48)) * 4;
 +
 +	for (y = 0; y < SAGIT_BAR_STRIDE; y++) {
 +		uint32_t pixel = (y < SAGIT_BAR_HEIGHT) ? color : 0;
@@ -370,7 +375,7 @@
  /* 23543331 - step 1 of kext / kernel __TEXT and __DATA colocation is to move
   * all kexts before the kernel.  This is only for arm64 devices and looks
   * something like the following:
-@@ -1830,6 +2030,8 @@
+@@ -1830,6 +2035,8 @@
  	vm_offset_t      ptpage_vaddr;
  	vm_map_address_t dynamic_memory_begin;
  
@@ -379,7 +384,7 @@
  	/*
  	 * Get the virtual and physical kernel-managed memory base from boot_args.
  	 */
-@@ -1897,6 +2099,8 @@
+@@ -1897,6 +2104,8 @@
  #endif // ARM_LARGE_MEMORY
  #endif
  
@@ -388,7 +393,7 @@
  #if KASAN && !defined(ARM_LARGE_MEMORY)
  	/* add the KASAN stolen memory to the physmap */
  	dynamic_memory_begin = static_memory_end + (shadow_ptop - shadow_pbase);
-@@ -1970,6 +2174,8 @@
+@@ -1970,6 +2179,8 @@
  	real_avail_end = avail_end;
  #endif
  
@@ -397,7 +402,7 @@
  	/*
  	 * Initialize l1 and l2 page table pages :
  	 *   map physical memory at the kernel base virtual address
-@@ -1989,6 +2195,8 @@
+@@ -1989,6 +2200,8 @@
  #endif
  
  
@@ -406,7 +411,7 @@
  #if __ARM_KERNEL_PROTECT__
  	/* Expand the page tables to prepare for the EL0 mappings. */
  	arm_vm_expand_kernel_el0_mappings();
-@@ -2068,6 +2276,8 @@
+@@ -2068,6 +2281,8 @@
  	}
  
  	(void) PE_parse_boot_argn("use_contiguous_hint", &use_contiguous_hint, sizeof(use_contiguous_hint));
@@ -415,7 +420,7 @@
  	assert(segSizePRELINKTEXT < 0x03000000); /* 23355738 */
  
  	/* if one of the new segments is present, the other one better be as well */
-@@ -2103,6 +2313,8 @@
+@@ -2103,6 +2318,8 @@
  
  	arm_vm_prot_init(args);
  
@@ -424,7 +429,7 @@
  	/*
  	 * Initialize the page tables for the low globals:
  	 *   cover this address range:
-@@ -2115,6 +2327,8 @@
+@@ -2115,6 +2332,8 @@
  	*cpu_l2_tte = (kvtophys(ptpage_vaddr) & ARM_TTE_TABLE_MASK) | ARM_TTE_TYPE_TABLE | ARM_TTE_VALID | ARM_TTE_TABLE_PXN | ARM_TTE_TABLE_XN;
  	bzero((void *)ptpage_vaddr, ARM_PGBYTES);
  
@@ -433,7 +438,7 @@
  	/*
  	 * Initialize l2 page table pages :
  	 *   cover this address range:
-@@ -2134,6 +2348,8 @@
+@@ -2134,6 +2353,8 @@
  	init_ptpages(cpu_tte, dynamic_memory_begin, VM_MAX_KERNEL_ADDRESS, TRUE, ARM_DYNAMIC_TABLE_XN | ARM_TTE_TABLE_AP(ARM_TTE_TABLE_AP_USER_NA));
  #endif
  
@@ -442,7 +447,7 @@
  #if KASAN
  	/* record the extent of the physmap */
  	physmap_vbase = physmap_base;
-@@ -2145,6 +2361,8 @@
+@@ -2145,6 +2366,8 @@
  	mt_early_init();
  #endif /* CONFIG_CPU_COUNTERS */
  
@@ -451,7 +456,7 @@
  	arm_set_user_tbi();
  
  	arm_vm_physmap_init(args);
-@@ -2162,6 +2380,9 @@
+@@ -2162,6 +2385,9 @@
  	cpu_tte = (tt_entry_t*)(phystokv(cpu_ttep));
  	invalid_tte = (tt_entry_t*)(phystokv(invalid_ttep));
  
@@ -461,7 +466,7 @@
  	// From here on out, we're off the bootstrap translation tables.
  
  
-@@ -2255,6 +2476,8 @@
+@@ -2255,6 +2481,8 @@
  #endif
  	pmap_bootstrap(dynamic_memory_begin);
  
@@ -470,7 +475,7 @@
  	disable_preemption();
  
  	/*
-@@ -2378,6 +2601,7 @@
+@@ -2378,6 +2606,7 @@
  	pmap_static_allocations_done();
  #endif
  	first_avail = avail_start;
@@ -478,6 +483,74 @@
  	patch_low_glo_static_region(args->topOfKernelData, avail_start - args->topOfKernelData);
  	enable_preemption();
  }
+--- a/osfmk/arm64/machine_routines.c
++++ b/osfmk/arm64/machine_routines.c
+@@ -994,6 +994,9 @@
+ #endif
+ }
+ 
++/* Bring-up ladder: one bar per checkpoint, painted by arm_vm_init.c. */
++extern void sagit_step(void);
++
+ void
+ ml_parse_cpu_topology(void)
+ {
+@@ -1008,6 +1011,8 @@
+ 	const boolean_t cpus_boot_arg_present = PE_parse_boot_argn("cpus", &cpu_boot_arg, sizeof(cpu_boot_arg));
+ 	const boolean_t cpumask_boot_arg_present = PE_parse_boot_argn("cpumask", &cpumask_boot_arg, sizeof(cpumask_boot_arg));
+ 
++	sagit_step();		/* topology: entered, boot args parsed */
++
+ 	// The cpus=N and cpumask=N boot args cannot be used simultaneously. Flag this
+ 	// so that we trigger a panic later in the boot process, once serial is enabled.
+ 	if (cpus_boot_arg_present && cpumask_boot_arg_present) {
+@@ -1020,6 +1025,8 @@
+ 	err = SecureDTInitEntryIterator(entry, &iter);
+ 	assert(err == kSuccess);
+ 
++	sagit_step();		/* topology: /cpus node and iterator */
++
+ 	for (int i = 0; i <= MAX_CPU_CLUSTER_PHY_ID; i++) {
+ 		cluster_offsets[i] = -1;
+ 		cluster_phys_to_logical[i] = -1;
+@@ -1137,6 +1144,10 @@
+ 		cluster->num_cpus++;
+ 		cluster->cpu_mask |= 1ULL << cpu->cpu_id;
+ 
++		if (topology_info.num_cpus == 1) {
++			sagit_step();	/* topology: first cpu node parsed */
++		}
++
+ 		if (is_boot_cpu) {
+ 			assert(topology_info.boot_cpu == NULL);
+ 			topology_info.boot_cpu = cpu;
+@@ -1148,6 +1159,8 @@
+ #endif
+ 	}
+ 
++	sagit_step();		/* topology: all cpu nodes parsed */
++
+ #if HAS_CLUSTER
+ 	/*
+ 	 * Build the cluster offset array, ensuring that the region reserved
+@@ -1174,6 +1187,8 @@
+ 	assert(topology_info.boot_cpu != NULL);
+ 	ml_read_chip_revision(&topology_info.chip_revision);
+ 
++	sagit_step();		/* topology: cluster offsets, boot cpu found */
++
+ 	/*
+ 	 * Set TPIDR_EL0 to indicate the correct cpu number & cluster id,
+ 	 * as we may not be booting from cpu 0. Userspace will consume
+@@ -1189,6 +1204,8 @@
+ 	__builtin_arm_wsr64("TPIDR_EL0", tpidr_el0);
+ 
+ 	__builtin_arm_wsr64("TPIDRRO_EL0", 0);
++
++	sagit_step();		/* topology: TPIDR_EL0 set, done */
+ }
+ 
+ const ml_topology_info_t *
 --- a/osfmk/arm64/start.s
 +++ b/osfmk/arm64/start.s
 @@ -456,6 +456,99 @@
