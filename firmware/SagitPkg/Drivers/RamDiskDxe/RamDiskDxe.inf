@@ -1,0 +1,49 @@
+## @file
+#  Publishes the bootloader-placed payload volume as a block device.
+#
+#  Copyright (c) 2026 ilertnost
+#  SPDX-License-Identifier: GPL-3.0-or-later
+##
+
+[Defines]
+  INF_VERSION                    = 0x00010005
+  BASE_NAME                      = SagitRamDiskDxe
+  FILE_GUID                      = 2B5E1F77-4C21-4D9E-8A3B-6F1D2C7E9A54
+  MODULE_TYPE                    = DXE_DRIVER
+  VERSION_STRING                 = 1.0
+  ENTRY_POINT                    = SagitRamDiskDxeEntry
+
+[Sources]
+  RamDiskDxe.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  MdeModulePkg/MdeModulePkg.dec
+  SagitPkg/SagitPkg.dec
+
+[LibraryClasses]
+  BaseLib
+  BaseMemoryLib
+  DebugLib
+  MemoryAllocationLib
+  PcdLib
+  PrintLib
+  UefiBootServicesTableLib
+  UefiDriverEntryPoint
+  UefiLib
+  UefiRuntimeServicesTableLib
+
+[Guids]
+  gFdtTableGuid
+
+[Protocols]
+  gEfiBlockIoProtocolGuid
+  gEfiDevicePathProtocolGuid
+  gEfiDiskIoProtocolGuid
+
+[Pcd]
+  gSagitTokenSpaceGuid.PcdFdtStoreAddress
+  gSagitTokenSpaceGuid.PcdPayloadProbeAddress
+
+[Depex]
+  TRUE

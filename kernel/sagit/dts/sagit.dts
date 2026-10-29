@@ -1,0 +1,38 @@
+// Xiaomi Mi 6 (sagit). The reserved regions are taken from the device's own
+// Android device tree, which is the authoritative map for this board; the
+// kernel must never touch them.
+/dts-v1/;
+/include/ "msm8998.dtsi"
+
+/ {
+	model = "Xiaomi Mi 6";
+	compatible = "device-tree", "qcom,msm8998";
+	#address-cells = <2>;
+	#size-cells = <2>;
+
+	// The owner's unit has 6 GB. This window is what the firmware itself
+	// advertises (PcdSystemMemorySize 0xF0000000 at 0x40000000), so it is safe
+	// but leaves memory above it unused. Extending it to the real top belongs in
+	// the loader, which can read the UEFI memory map; a guessed larger number
+	// here would let the kernel touch RAM that firmware has already reserved.
+	memory@40000000 {
+		device_type = "memory";
+		reg = <0x0 0x40000000 0x0 0xf0000000>;
+	};
+
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		removed_regions@85800000       { reg = <0x0 0x85800000 0x0 0x03700000>; no-map; };
+		pil_adsp_region@8b200000       { reg = <0x0 0x8b200000 0x0 0x01e00000>; no-map; };
+		spss_region@8ab00000           { reg = <0x0 0x8ab00000 0x0 0x00700000>; no-map; };
+		modem_region@8d000000          { reg = <0x0 0x8d000000 0x0 0x07000000>; no-map; };
+		pil_video_region@94000000      { reg = <0x0 0x94000000 0x0 0x00500000>; no-map; };
+		pil_mba_region@94500000        { reg = <0x0 0x94500000 0x0 0x00200000>; no-map; };
+		pil_slpi_region@94700000       { reg = <0x0 0x94700000 0x0 0x00f00000>; no-map; };
+		pil_ipa_gpu_region@95600000    { reg = <0x0 0x95600000 0x0 0x00100000>; no-map; };
+		splash_region@9d600000         { reg = <0x0 0x9d600000 0x0 0x02400000>; no-map; };
+	};
+};

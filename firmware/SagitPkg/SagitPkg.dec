@@ -1,0 +1,34 @@
+## @file
+#  Sagit firmware package: the pieces of the boot chain that are ours.
+#
+#  Copyright (c) 2026 ilertnost
+#  SPDX-License-Identifier: GPL-3.0-or-later
+##
+
+[Defines]
+  DEC_SPECIFICATION              = 0x00010005
+  PACKAGE_NAME                   = SagitPkg
+  PACKAGE_GUID                   = 6F0B1C1E-6A0E-4C55-9D4B-1B0A4E0A7C11
+  PACKAGE_VERSION                = 0.1
+
+[Guids]
+  ## Include/Guid/...
+  gSagitTokenSpaceGuid  = { 0xC0A1F5D4, 0x7E3B, 0x4C21, { 0x8F, 0x62, 0x1A, 0x55, 0x9D, 0x3E, 0x70, 0x11 } }
+
+[Protocols]
+
+[PcdsFixedAtBuild]
+  ## Address of the cell the platform stores the incoming device tree pointer in.
+  #  edk2-msm8998 stores x0 there in ArmPlatformPeiBootAction (see the
+  #  "oh my fdt" comment in ArmPlatformHelper.S). Tried before the FDT
+  #  configuration table, which holds DtPlatformDxe's bundled Linux DTB.
+  gSagitTokenSpaceGuid.PcdFdtStoreAddress|0x83300000|UINT64|0x83300000
+
+  ## Where the boot image declares the payload volume (the --ramdisk_offset of
+  #  tools/build-sagit-edk2.sh). RamDiskDxe probes it for a FAT boot sector
+  #  when the device tree carries no initrd bounds.
+  gSagitTokenSpaceGuid.PcdPayloadProbeAddress|0xE0000000|UINT64|0xE0000002
+
+[PcdsDynamic]
+
+[PcdsFeatureFlag]

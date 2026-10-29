@@ -1,0 +1,121 @@
+// MSM8998 topology, written for this port.
+//
+// The Mi 6 uses a 4+4 big.LITTLE arrangement: four Cortex-A53 cores at
+// affinity 0x0-0x3 and four Cortex-A73 cores at 0x100-0x103. XNU numbers the
+// clusters from the affinity bits and reads the cluster kind from
+// "unixnu,cluster-type", which the converter turns into Apple's integer
+// cluster-type property ('E' for the A53 cluster, 'P' for the A73 cluster).
+//
+// All eight cores are enabled: the hardware DTS is the description of the SoC,
+// not of a bring-up milestone. PSCI (SMC) is the enable method and is exported
+// into the ADT so XNU can start the secondary cores.
+/ {
+	cpus {
+		#address-cells = <2>;
+		#size-cells = <0>;
+		timebase-frequency = <19200000>;
+
+		cpu0: cpu@0 {
+			device_type = "cpu";
+			compatible = "arm,armv8";
+			reg = <0x0 0x0>;
+			enable-method = "psci";
+			unixnu,cluster-type = "E";
+			status = "okay";
+		};
+		cpu1: cpu@1 {
+			device_type = "cpu";
+			compatible = "arm,armv8";
+			reg = <0x0 0x1>;
+			enable-method = "psci";
+			unixnu,cluster-type = "E";
+			status = "okay";
+		};
+		cpu2: cpu@2 {
+			device_type = "cpu";
+			compatible = "arm,armv8";
+			reg = <0x0 0x2>;
+			enable-method = "psci";
+			unixnu,cluster-type = "E";
+			status = "okay";
+		};
+		cpu3: cpu@3 {
+			device_type = "cpu";
+			compatible = "arm,armv8";
+			reg = <0x0 0x3>;
+			enable-method = "psci";
+			unixnu,cluster-type = "E";
+			status = "okay";
+		};
+		cpu4: cpu@100 {
+			device_type = "cpu";
+			compatible = "arm,armv8";
+			reg = <0x0 0x100>;
+			enable-method = "psci";
+			unixnu,cluster-type = "P";
+			status = "okay";
+		};
+		cpu5: cpu@101 {
+			device_type = "cpu";
+			compatible = "arm,armv8";
+			reg = <0x0 0x101>;
+			enable-method = "psci";
+			unixnu,cluster-type = "P";
+			status = "okay";
+		};
+		cpu6: cpu@102 {
+			device_type = "cpu";
+			compatible = "arm,armv8";
+			reg = <0x0 0x102>;
+			enable-method = "psci";
+			unixnu,cluster-type = "P";
+			status = "okay";
+		};
+		cpu7: cpu@103 {
+			device_type = "cpu";
+			compatible = "arm,armv8";
+			reg = <0x0 0x103>;
+			enable-method = "psci";
+			unixnu,cluster-type = "P";
+			status = "okay";
+		};
+	};
+
+	// PSCI 1.0 over SMC. The converter copies "method" into the ADT /psci
+	// node; XNU reads it from there, not from the hardware DTB.
+	psci {
+		compatible = "arm,psci-1.0";
+		method = "smc";
+	};
+
+	soc {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		// GICv3: distributor at 0x17a00000, redistributors in the 1 MiB
+		// window at 0x17b00000. "intc" is the ADT name XNU's platform
+		// code looks up under /arm-io.
+		gic: interrupt-controller@17a00000 {
+			compatible = "arm,gic-v3";
+			unixnu,adt-name = "intc";
+			#address-cells = <2>;
+			#size-cells = <2>;
+			#interrupt-cells = <3>;
+			interrupt-controller;
+			reg = <0 0x17a00000 0 0x10000>, <0 0x17b00000 0 0x100000>;
+			redistributor-stride = <0 0x20000>;
+		};
+
+		// ARMv8 generic timer. Four PPIs, in the order the ARM binding
+		// uses: secure physical, non-secure physical, virtual,
+		// hypervisor. The GIC specifiers are <type 1 (PPI) number flags>.
+		timer {
+			compatible = "arm,armv8-timer";
+			unixnu,adt-name = "timer";
+			clock-frequency = <19200000>;
+			interrupt-parent = <&gic>;
+			interrupts = <1 19 4>, <1 14 4>, <1 11 4>, <1 10 4>;
+		};
+	};
+};

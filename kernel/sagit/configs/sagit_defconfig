@@ -1,0 +1,31 @@
+# Minimal source-only kernel: XNU gets to a console and an in-memory root.
+# No storage driver, no APFS, no Apple userspace.
+CONFIG_XNU_SOURCE_CORECRYPTO14=y
+CONFIG_XNU_SOURCE_PTHREAD=y
+# Source crypto and pthread are archives, and mockfs is a fixture archive; the
+# builders named in board.toml only run when this is on. Without it the link
+# stops on _corecrypto_kext_start and _mockfs_mountroot.
+CONFIG_XNU_BUILD_ARCHIVES=y
+CONFIG_XNU_ARM_DT_PLATFORM=y
+CONFIG_XNU_ARMCPU=y
+CONFIG_XNU_SOURCE_MOCKFS=y
+
+# The Apple trust chain needs the original AppleImage4/AMFI closure.
+CONFIG_XNU_TRUST_CACHE_RUNTIME=n
+CONFIG_XNU_DIAGNOSTIC_EMPTY_ENTITLEMENTS=y
+
+CONFIG_XNU_NATIVE_ARCH_TIMER=y
+
+# MSM8998 raises UNDEF on MSR PAN; stay on ARMv8.0 paths.
+CONFIG_XNU_NATIVE_PAN=n
+
+# Never touch the BCM2837 build-template panic address on this SoC.
+CONFIG_XNU_DT_PANIC_REGION=y
+
+CONFIG_XNU_BOOT_PROGRESS=n
+CONFIG_XNU_NATIVE_LEGACY_DISPLAY=n
+CONFIG_XNU_NATIVE_ADRENO=n
+CONFIG_XNU_NATIVE_UFS=n
+CONFIG_XNU_NATIVE_RAM_BLOCK=n
+CONFIG_XNU_NATIVE_VIRTIO_BLOCK=n
+CONFIG_XNU_CRYPTO_BOOTSTRAP="source"
