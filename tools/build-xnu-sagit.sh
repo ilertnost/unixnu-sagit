@@ -57,6 +57,14 @@ if ! cmp -s "$PATCHES/0006-sagit-boot-ladder.patch" "$LADDER"; then
   install -m 0644 "$PATCHES/0006-sagit-boot-ladder.patch" "$LADDER"
 fi
 
+# The board config is a device patch too, but it touches a header no shared patch
+# looks at, so it needs no reverse/applied dance: the build's own idempotent
+# match keeps it applied once and skips it afterwards.
+CLUSTERS="$SRC/patches/xnu/zzzz-sagit-cpu-clusters.patch"
+if ! cmp -s "$PATCHES/0007-sagit-cpu-clusters.patch" "$CLUSTERS"; then
+  install -m 0644 "$PATCHES/0007-sagit-cpu-clusters.patch" "$CLUSTERS"
+fi
+
 # ...and it has to be *unapplied* before the build starts. The build script
 # reverse-checks every patch to decide whether it still has to apply it, and
 # the ladder inserts lines into the context that

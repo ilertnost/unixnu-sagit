@@ -272,6 +272,19 @@ addresses are the code, the framebuffer and `boot_args`; red instead of green
 identifies the one that is not mapped. This exists because a red framebuffer
 probe is what stopped the ladder at stage 2 in the first place.
 
+Five bars is where the third photograph stopped, and the reason was in
+`pexpert/pexpert/arm64/board_config.h`, not in the kernel: the BCM2837 board
+config that this build rides on declares `MAX_CPU_CLUSTERS 1`, so
+`MAX_CPU_CLUSTER_PHY_ID` is 0, and `ml_parse_cpu_topology()` computes
+`phys_cluster_id = (cluster_type == CLUSTER_TYPE_P)` when `HAS_CLUSTER` is not
+set. Our DT describes the four gold Kryo cores with `cluster-type = "P"`, so the
+fifth CPU node trips `assert(phys_cluster_id <= MAX_CPU_CLUSTER_PHY_ID)`; an
+assert without a console is a silent freeze. MSM8998 really has two clusters, so
+`patches/0007-sagit-cpu-clusters.patch` sets `MAX_CPU_CLUSTERS 2` for the
+BCM2837 config and the build installs it next to the ladder as
+`patches/xnu/zzzz-sagit-cpu-clusters.patch`. It has to sit after the shared
+`native-smp-secondary.patch`, which edits the same three lines of that header.
+
 The first version of this painter took its x offsets as bytes while thinking of
 them as pixels, so every square was drawn at a quarter of its intended x and
 sixteen pixels wide; a bar that should have been 64 pixels wide was 16, and the

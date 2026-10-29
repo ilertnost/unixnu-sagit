@@ -1,0 +1,17 @@
+--- a/pexpert/pexpert/arm64/board_config.h
++++ b/pexpert/pexpert/arm64/board_config.h
+@@ -135,7 +135,13 @@
+ 
+ #define MAX_L2_CLINE                   6
+ #define MAX_CPUS                       8 /* sheng: SM8550 has eight cores */
+-#define MAX_CPU_CLUSTERS               1
++/*
++ * sagit: MSM8998 has two Kryo clusters -- four silver cores at MPIDR 0x0..0x3
++ * and four gold cores at 0x100..0x103 -- so the BCM2837 single-cluster default
++ * makes ml_parse_cpu_topology() panic on the first gold core, silently, four
++ * checkpoints into arm_init().
++ */
++#define MAX_CPU_CLUSTERS               2
+ 
+ #define CORE_NCTRS                     8 /* Placeholder; KPC is not enabled for this target */
+ #endif  /* ARM64_BOARD_CONFIG_BCM2837 */
