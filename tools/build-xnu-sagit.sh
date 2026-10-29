@@ -2,7 +2,7 @@
 # Build XNU for the Xiaomi Mi 6 (sagit) from the UniXNU base.
 #
 # Source tree: the UniXNU checkout that carries the Linux toolchain driver.
-# The device profile lives in this repository under xnu/sagit, and everything
+# The device profile lives in this repository under kernel/sagit, and everything
 # in it is ours.
 #
 # Usage:
@@ -16,7 +16,7 @@ set -eo pipefail
 
 SRC=${SRC:-/data/opencode/unixnu-src}
 TOOLCHAIN=${TOOLCHAIN:-/data/opencode/unixnu-toolchain}
-DEVICE_DIR=$(cd "$(dirname "$0")/.." && pwd)/xnu/sagit
+DEVICE_DIR=$(cd "$(dirname "$0")/.." && pwd)/kernel/sagit
 PATCHES=$(cd "$(dirname "$0")/.." && pwd)/patches
 
 # LLVM is several gigabytes of intermediate objects; keep them off the root

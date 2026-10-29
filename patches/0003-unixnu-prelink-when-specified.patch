@@ -1,0 +1,17 @@
+diff --git a/scripts/unixnu/cli.py b/scripts/unixnu/cli.py
+index f400142..156eee5 100644
+--- a/scripts/unixnu/cli.py
++++ b/scripts/unixnu/cli.py
+@@ -152,7 +152,11 @@ def cmd_build(ctx):
+     modules = prepare(ctx, steps + (['kernel'] if 'prelink' in steps else []))
+     if 'kernel' in steps:
+         kernel.build(ctx, modules)
+-        kernel.prelink(ctx)
++        # A source-only board has no [kernel.prelink] and no Apple kexts to merge;
++        # the linked kernel is the deliverable. Prelinking without a spec used to
++        # fail the whole build after a successful link.
++        if ctx.board.get('kernel', {}).get('prelink'):
++            kernel.prelink(ctx)
+     elif 'prelink' in steps:
+         kernel.prelink(ctx)
+     if 'package' in steps:

@@ -148,6 +148,38 @@ and a non-zero exit. `patches/0003-unixnu-prelink-when-specified.patch` makes
 the prelink step conditional on the board asking for it. `tools/build-xnu-sagit.sh`
 applies it idempotently.
 
+## Kernel output
+
+A `DEVELOPMENT` XNU build is silent unless it is told otherwise, and this board
+has no UART for the fallback. `pexpert/arm/pe_kprintf.c` keeps two switches:
+
+| Switch | Cleared by |
+|---|---|
+| `disable_serial_output` | `debug=` with `DB_KPRT` (`0x8`), e.g. `debug=0x14e` |
+| `disable_kprintf_output` | `-enable_kprintf_spam` in a `DEVELOPMENT` build |
+
+`kprintf` prints only when both are false. `-v` clears neither, which is why a
+kernel that boots correctly still leaves the screen black.
+
+With both set, `serial_init()` finds no `PI3_UART` / `VMAPPLE_UART` /
+`DOCKCHANNEL_UART` / `APPLE_UART` node on MSM8998, returns 0, and `PE_kputc`
+becomes `console_write_unbuffered`. `cons_ops_index` starts at `VC_CONS_OPS`, so
+the text lands on the video console:
+
+```sh
+python3 tools/mksagit-payload.py \
+  --kernel out/kernel.macho --adt out/adt/kernel.macho.adt \
+  --output out/sagit-payload-volume.img \
+  --args="-v -enable_kprintf_spam debug=0x14e"
+```
+
+`DarwinBoot` fills `boot_args.Video` from GOP with `v_display = 1`, so
+`PE_create_console` initialises the graphics console and `initialize_screen`
+maps the framebuffer with `ml_io_map_unmappable` before `kernel_map` exists.
+The screen then behaves like a serial terminal: it is the kernel log.
+
+A real terminal over USB is ADR-0006.
+
 ## Open questions
 
 - **RAM size.** The owner's unit has 6 GB. The device tree declares the

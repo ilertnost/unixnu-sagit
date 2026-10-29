@@ -1,0 +1,15 @@
+diff --git a/Platforms/Msm8998Pkg/Msm8998.dsc b/Platforms/Msm8998Pkg/Msm8998.dsc
+index 682b55d..24cb2cf 100644
+--- a/Platforms/Msm8998Pkg/Msm8998.dsc
++++ b/Platforms/Msm8998Pkg/Msm8998.dsc
+@@ -13,6 +13,10 @@
+ [BuildOptions]
+   RVCT:RELEASE_*_*_CC_FLAGS  = -DMDEPKG_NDEBUG
+   GCC:RELEASE_*_*_CC_FLAGS  = -DMDEPKG_NDEBUG
++  # GCC 13 turns -Wdangling-pointer on by default, and the platform stores the
++  # address of a local memory-map array in a static. It is deliberate here, so
++  # the diagnostic is off rather than the code changed.
++  GCC:*_*_*_CC_FLAGS = -Wno-dangling-pointer
+ 
+ [PcdsFixedAtBuild.common]
+   gArmTokenSpaceGuid.PcdSystemMemorySize|0xF0000000        # System Memory (4GB)
