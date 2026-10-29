@@ -24,6 +24,14 @@ PATCHES=$(cd "$(dirname "$0")/.." && pwd)/patches
 export TMPDIR=${TMPDIR:-/data/opencode/tmp}
 export UNIXNU_TOOLCHAIN="$TOOLCHAIN"
 
+# The build script applies $SRC/patches/xnu/*.patch with a shell glob. In a
+# UTF-8 locale the collation ignores the dash, so "zzyb-" sorts before "zzy-"
+# and the optional observation hooks are applied before the patch their context
+# comes from. C collation puts them back in byte order, which is the order the
+# script's own comment describes ("reverse newest first, re-apply in name
+# order").
+export LC_ALL=C
+
 # The shims in the toolchain default to /opt/unixnu-linux, which is not where
 # this prefix is installed. The driver reads UNIXNU_TOOLCHAIN, so exporting it
 # is enough; nothing needs to live in /opt.
@@ -47,6 +55,20 @@ fi
 LADDER="$SRC/patches/xnu/zzzz-sagit-boot-ladder.patch"
 if ! cmp -s "$PATCHES/0006-sagit-boot-ladder.patch" "$LADDER"; then
   install -m 0644 "$PATCHES/0006-sagit-boot-ladder.patch" "$LADDER"
+fi
+
+# ...and it has to be *unapplied* before the build starts. The build script
+# reverse-checks every patch to decide whether it still has to apply it, and
+# the ladder inserts lines into the context that
+# native-4k-bootstrap-capacity.patch and zzz-boot-progress.patch use for their
+# own reverse-check. Leaving it in place makes those look unapplied, so the
+# build tries to apply them again and fails. Reversing it here leaves a tree
+# that is exactly "all shared patches applied"; the filename order then puts
+# the ladder back on the very last pass.
+WORK="$SRC/out/sagit/tree/.cache/xnu-work"
+if git -C "$WORK" rev-parse --git-dir >/dev/null 2>&1 &&
+   git -C "$WORK" apply --reverse --check "$LADDER" 2>/dev/null; then
+  git -C "$WORK" apply --reverse "$LADDER"
 fi
 
 cd "$SRC"

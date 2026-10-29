@@ -192,20 +192,39 @@ applied after every shared patch):
 | Stage | Square | Where |
 |---|---|---|
 | 0 | white | `start_first_cpu`, stacks ready, MMU off |
-| 1 | blue | after both bootstrap maps are built, MMU off |
-| 2 | green | MMU on, about to enter `arm_init()` |
-| 3 | cyan | first statement of `arm_init()` |
-| 4 | magenta | `arm_vm_init()` returned |
-| 5 | yellow | `PE_create_console()` returned |
-| 6 | red | end of `arm_init()`, before `machine_startup()` |
-| 7 | orange | screen acquired |
+| 1 | yellow | both bootstrap maps built, MMU off |
+| 2 | cyan | translation registers and vectors set, MMU still off |
+| 3 | green | MMU on, execution continued through the new tables |
+| 4 | blue | end of `start.s`, about to call into C |
+| 5 | orange | C entry, framebuffer recorded (`sagit_mark_args`) |
+| 6 | magenta | first statement of `arm_init()` |
+| 7 | purple | `arm_vm_init()` returned |
+| 8 | teal | `PE_create_console()` returned |
+| 9 | red | end of `arm_init()`, before `machine_startup()` |
+| 10 | spring green | screen acquired, `kprintf` visible |
 
-The squares are 48x48 at y=140, x=8+stage*56, so the count of squares is the
+The squares are 64x64 at y=140, x=64+stage*80, so the count of squares is the
 number of stages reached: a missing square is the first checkpoint that did not
-run. The painter uses `boot_args.Video[0]` as a physical address (valid with the
-MMU off and under the V=P bootstrap map) and translates it through
-`gVirtBase`/`gPhysBase` once `arm_vm_init()` has installed the linear window,
-cleaning the cache lines because the display controller scans DRAM directly.
+run. Stages 0-5 are painted from assembler and the rest from C.
+
+The framebuffer (`0x9d400000`) is outside the 256 MB window the loader hands
+over, so the painter has three paths. With the MMU off it is the physical
+address itself. After the MMU comes on, `start.s` adds L2 block entries for it
+to the V=P bootstrap map, which is why the assembler checkpoints can keep using
+the physical address. Once `arm_vm_init()` replaces TTBR0 with the kernel pmap,
+that map is gone, so the C half maps the framebuffer once with
+`ml_io_map_unmappable()` -- the same path `PE_create_console()` uses a few
+calls later -- and paints through that mapping. Squares are cleaned to DRAM
+because the display controller scans memory directly.
+
+The patch has to be the very last one applied, and it must start from a tree
+where it is *not* applied: the format-1 build decides whether a patch still
+needs applying by reverse-checking it, and the ladder's insertion points sit in
+the context that `native-4k-bootstrap-capacity.patch` and
+`zzz-boot-progress.patch` use for their own reverse-check. `tools/build-xnu-sagit.sh`
+therefore reverses the ladder before each build and exports `LC_ALL=C`, because
+in a UTF-8 locale the glob sorts `zzyb-` before `zzy-` and breaks the dependency
+order of the observation hooks.
 
 A real terminal over USB is ADR-0006.
 
