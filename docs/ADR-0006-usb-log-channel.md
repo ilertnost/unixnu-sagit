@@ -157,9 +157,13 @@ GPL-2.0-only code enters this tree.
 
 ## Open questions
 
-- Which ABL path leaves the DWC3 controller: does it keep USB 2.0 PHY powered
-  after a normal boot, or does the first register access hang? Needs the
-  `probe` treatment that `SagitReportDxe` already applies to the ramdisk search.
+- ABL leaves its fastboot USB running, and a device-mode stack that starts
+  afterwards has to stop it first: the reference bridge ships
+  `usb_firmware_stop.c`, `usb_hardware_stop.c`, `usb_rpm.c` and
+  `usb_topology.c` for exactly this. So the controller and PHY are already
+  powered at handoff, which is good for us, but they are configured for
+  fastboot's descriptor set and have to be reset before reuse. Stage B has to
+  reproduce that reset, not just enable clocks.
 - Does the Li-ion/charger path matter? USB device mode on this board may depend
   on VBUS detection through the PMIC, which the firmware does not touch yet.
 - `GCC` clock and `GDSC` control require the RPM/RPMh or direct register access
