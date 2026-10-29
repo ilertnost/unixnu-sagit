@@ -183,39 +183,116 @@ kernel log.
 
 Text only appears in `kernel_bootstrap()`, after `initialize_screen(NULL,
 kPEAcquireScreen)`; `PE_create_console` merely prepares the console. A fault
-anywhere between the loader's branch and that point is therefore silent. The
-kernel paints a checkpoint square into the handoff framebuffer at each stage
-instead (`patches/0006-sagit-boot-ladder.patch`, installed as
+anywhere between the loader's branch and that point is therefore silent, so the
+kernel reports progress straight into the handoff framebuffer
+(`patches/0006-sagit-boot-ladder.patch`, installed as
 `patches/xnu/zzzz-sagit-boot-ladder.patch` in the UniXNU tree so that it is
-applied after every shared patch):
+applied after every shared patch).
 
-| Stage | Square | Where |
+Reading a photograph of a dim screen turned out to be the hard part: adjacent
+coloured squares blur into each other and magenta, purple and teal are the same
+colour on a phone camera. So the indicator is *position* encoded, not colour
+encoded. It has two parts.
+
+**Row of six squares**, 64x64 at y=140, x=64+stage*80, painted from assembler
+(stage 5 from C, through `sagit_mark_args`):
+
+| Stage | Colour | Where |
 |---|---|---|
 | 0 | white | `start_first_cpu`, stacks ready, MMU off |
 | 1 | yellow | both bootstrap maps built, MMU off |
 | 2 | cyan | translation registers and vectors set, MMU still off |
 | 3 | green | MMU on, execution continued through the new tables |
 | 4 | blue | end of `start.s`, about to call into C |
-| 5 | orange | C entry, framebuffer recorded (`sagit_mark_args`) |
-| 6 | magenta | first statement of `arm_init()` |
-| 7 | purple | `arm_vm_init()` returned |
-| 8 | teal | `PE_create_console()` returned |
-| 9 | red | end of `arm_init()`, before `machine_startup()` |
-| 10 | spring green | screen acquired, `kprintf` visible |
+| 5 | orange | C entry, framebuffer recorded |
 
-The squares are 64x64 at y=140, x=64+stage*80, so the count of squares is the
-number of stages reached: a missing square is the first checkpoint that did not
-run. Stages 0-5 are painted from assembler and the rest from C.
+Six squares mean the bootstrap page tables, the MMU and the framebuffer mapping
+survived the handover; anything less is a boot-chain regression and the count
+tells which stage died.
 
-The framebuffer (`0x9d400000`) is outside the 256 MB window the loader hands
-over, so the painter has three paths. With the MMU off it is the physical
-address itself. After the MMU comes on, `start.s` adds L2 block entries for it
-to the V=P bootstrap map, which is why the assembler checkpoints can keep using
-the physical address. Once `arm_vm_init()` replaces TTBR0 with the kernel pmap,
-that map is gone, so the C half maps the framebuffer once with
-`ml_io_map_unmappable()` -- the same path `PE_create_console()` uses a few
-calls later -- and paints through that mapping. Squares are cleaned to DRAM
+**Column of bars**, 320x30 at x=64, first bar at y=320, one bar per checkpoint,
+36 pixels per step, with six black rows between bars so the column reads as a
+stack of blocks. Bar `n` therefore ends at `y = 320 + (n+1)*36`: measure the
+bottom edge of the green/cyan stack and divide by 36, no counting required.
+Bars are green until `arm_vm_init()` replaces TTBR0 and cyan afterwards, which
+also says whether the post-handover framebuffer path works.
+
+| Bar | Checkpoint |
+|---|---|
+| 0 | `arm_init()` entered |
+| 1 | image rebased and signed, constant boot args in place |
+| 2 | `cpu_bootstrap()` |
+| 3 | `rtclock_early_init()` |
+| 4 | `kernel_startup_bootstrap()` |
+| 5 | `timer_call_init()` |
+| 6 | `cpu_init()` |
+| 7 | `processor_bootstrap()` |
+| 8 | about to call `arm_vm_init()` |
+| 9 | `arm_vm_init()` entered |
+| 10 | memory geometry, physmap range decided |
+| 11 | `cpu_tte` and `invalid_tte` allocated |
+| 12 | kernel window mapped into the new tables |
+| 13 | Mach-O segments resolved |
+| 14 | `arm_vm_prot_init()` |
+| 15 | low globals mapped |
+| 16 | dynamic range mapped |
+| 17 | cpu counters, before the physmap |
+| 18 | TTBR0 replaced, KVA live (first cyan bar) |
+| 19 | `pmap_bootstrap()` |
+| 20 | `arm_vm_init()` done |
+| 21 | `arm_init()` after `arm_vm_init()` |
+| 22 | `PE_consistent_debug_inherit()` |
+| 23 | `serial_init()` |
+| 24 | `kernel_startup_initialize_upto(STARTUP_SUB_KPRINTF)` |
+| 25 | first `kprintf` |
+| 26 | `PE_create_console()` |
+| 27 | about to call `machine_startup()` |
+| 28 | screen acquired, kernel log takes over |
+
+Three green squares at y=240, x=64/144/224, are a pre-flight check of the
+bootstrap tables, taken just before the MMU comes on: `AT S1E1R` translates an
+address with TTBR0/TCR even while `SCTLR_EL1.M` is zero, and `PAR_EL1.F` then
+says whether the first access after the switch would fault. Left to right the
+addresses are the code, the framebuffer and `boot_args`; red instead of green
+identifies the one that is not mapped. This exists because a red framebuffer
+probe is what stopped the ladder at stage 2 in the first place.
+
+The first version of this painter took its x offsets as bytes while thinking of
+them as pixels, so every square was drawn at a quarter of its intended x and
+sixteen pixels wide; a bar that should have been 64 pixels wide was 16, and the
+squares looked like a barcode in the corner of the screen. The offsets are
+multiplied by four now.
+
+The loader's log gives the numbers the painter has to live with:
+
+```
+ARM64 va=0xFFFFFFF007004000 pa=0x44C04000 args=0x45E64000 owned=0x10000000
+video base=0x9d400000 display=1 row=4320 width=1080 height=1920 depth=32
+```
+
+The framebuffer is outside the 256 MB window (the window is
+`0x44C04000..0x54C04000`), so the painter has three paths. With the MMU off it
+is the physical address itself. After the MMU comes on, `start.s` adds L2 block
+entries for it to the V=P bootstrap map, which is why the assembler checkpoints
+can keep using the physical address. Once `arm_vm_init()` replaces TTBR0 with
+the kernel pmap, that map is gone, but the kernel physmap covers all of RAM --
+the framebuffer included -- so `phystokv()` of the physical address works and is
+what the C half uses (`sagit_kva_live` marks the switch, not `gVirtBase`, which
+is set long before the tables actually change). `ml_io_map_unmappable()` is only
+the fallback for a framebuffer outside reported memory. Bars are cleaned to DRAM
 because the display controller scans memory directly.
+
+The framebuffer and the window are in *different* 1 GB regions (L1 index 2 vs
+1 on 4 KB granule with `T0SZ_BOOT` 26), so the framebuffer's L1 slot is empty
+when the bootstrap map is built. The code therefore cannot simply fill L2
+entries: it takes the last page of the reserved bootstrap pool
+(`BOOTSTRAP_TABLE_BYTES - PGBYTES`), zeroes it, points the framebuffer's L1
+entry at it and only then writes the block entries. The allocator starts at the
+fourth page and needs one L2 page per gigabyte of window, so that page stays
+free for the 256 MB window. Skipping this step is invisible before the MMU and
+fatal right after it: the store of stage 3 takes a translation fault, the
+exception vector is at a valid KVA, and the board simply stops with the cyan
+square on screen.
 
 The patch has to be the very last one applied, and it must start from a tree
 where it is *not* applied: the format-1 build decides whether a patch still

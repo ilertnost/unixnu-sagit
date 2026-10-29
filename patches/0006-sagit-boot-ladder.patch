@@ -1,4 +1,3 @@
-diff --git a/osfmk/arm/arm_init.c b/osfmk/arm/arm_init.c
 --- a/osfmk/arm/arm_init.c
 +++ b/osfmk/arm/arm_init.c
 @@ -104,6 +104,9 @@
@@ -6,7 +5,7 @@ diff --git a/osfmk/arm/arm_init.c b/osfmk/arm/arm_init.c
  extern int      disableConsoleOutput;
  
 +/* Bring-up ladder checkpoints; the squares are painted into the framebuffer. */
-+extern void sagit_mark(unsigned stage);
++extern void sagit_step(void);
 +
  int             pc_trace_buf[PC_TRACE_BUF_SIZE] = {0};
  int             pc_trace_cnt = PC_TRACE_BUF_SIZE;
@@ -15,43 +14,109 @@ diff --git a/osfmk/arm/arm_init.c b/osfmk/arm/arm_init.c
  	DTEntry chosen = NULL;
  	unsigned int dt_entry_size = 0;
  
-+	sagit_mark(6);
++	sagit_step();		/* arm_init: entered */
 +
  	arm_setup_pre_sign();
  
  	arm_slide_rebase_and_sign_image();
-@@ -539,6 +544,8 @@
+@@ -362,6 +367,8 @@
+ 	const_boot_args = *args;
+ 	BootArgs = args = &const_boot_args;
+ 
++	sagit_step();		/* arm_init: image rebased and signed */
++
+ 	cpu_data_init(&BootCpuData);
+ #if defined(HAS_APPLE_PAC)
+ 	/* bootstrap cpu process dependent key for kernel has been loaded by start.s */
+@@ -472,20 +479,32 @@
+ 	thread->machine.preemption_count = 0;
+ 	cpu_bootstrap();
+ 
++	sagit_step();		/* arm_init: cpu_bootstrap */
++
+ 	rtclock_early_init();
+ 
++	sagit_step();		/* arm_init: rtclock_early_init */
++
+ 	kernel_debug_string_early("kernel_startup_bootstrap");
+ 	kernel_startup_bootstrap();
+ 
++	sagit_step();		/* arm_init: kernel_startup_bootstrap */
++
+ 	/*
+ 	 * Initialize the timer callout world
+ 	 */
+ 	timer_call_init();
+ 
++	sagit_step();		/* arm_init: timer_call_init */
++
+ 	cpu_init();
+ 
++	sagit_step();		/* arm_init: cpu_init */
++
+ 	processor_bootstrap();
+ 
++	sagit_step();		/* arm_init: processor_bootstrap */
++
+ 	if (PE_parse_boot_argn("maxmem", &maxmem, sizeof(maxmem))) {
+ 		xmaxmem = (uint64_t) maxmem * (1024 * 1024);
+ 	} else if (PE_get_default("hw.memsize", &memsize, sizeof(memsize))) {
+@@ -531,6 +550,7 @@
+ 	__builtin_arm_wsr("pan", 1);
+ #endif  /* __ARM_PAN_AVAILABLE__ */
+ 
++	sagit_step();		/* arm_init: before arm_vm_init */
+ 	boot_progress_stage("arm_vm_init enter");
+ 	arm_vm_init(xmaxmem, args);
+ 	boot_progress_stage("arm_vm_init returned");
+@@ -539,16 +559,25 @@
  		patch_low_glo();
  	}
  
-+	sagit_mark(7);
++	sagit_step();		/* arm_init: arm_vm_init returned */
 +
  #if __arm64__ && WITH_CLASSIC_S2R
  	sleep_token_buffer_init();
  #endif
-@@ -590,6 +597,8 @@
+ 
+ 	PE_consistent_debug_inherit();
+ 
++	sagit_step();		/* arm_init: consistent debug inherited */
++
+ 	/* Setup debugging output. */
+ 	const unsigned int serial_exists = serial_init();
++	sagit_step();		/* arm_init: serial_init */
++
+ 	kernel_startup_initialize_upto(STARTUP_SUB_KPRINTF);
++	sagit_step();		/* arm_init: startup up to kprintf */
++
+ 	kprintf("kprintf initialized\n");
++	sagit_step();		/* arm_init: first kprintf */
+ 
+ 	serialmode = 0;
+ 	if (PE_parse_boot_argn("serial", &serialmode, sizeof(serialmode))) {
+@@ -590,6 +619,8 @@
  	}
  	PE_create_console();
  
-+	sagit_mark(8);
++	sagit_step();		/* arm_init: PE_create_console */
 +
  	/* setup console output */
  	PE_init_printf(FALSE);
  
-@@ -667,6 +676,9 @@
+@@ -667,6 +698,9 @@
  	 * against string vulnerabilities
  	 */
  	__stack_chk_guard &= ~(0xFFULL << 8);
 +
-+	sagit_mark(9);
++	sagit_step();		/* arm_init: about to machine_startup */
 +
  	machine_startup(args);
  }
  
-diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
 --- a/osfmk/arm64/arm_vm_init.c
 +++ b/osfmk/arm64/arm_vm_init.c
-@@ -128,6 +128,135 @@
+@@ -128,6 +128,189 @@
  SECURITY_READ_ONLY_LATE(unsigned long) gT0Sz = T0SZ_BOOT;
  SECURITY_READ_ONLY_LATE(unsigned long) gT1Sz = T1SZ_BOOT;
  
@@ -65,57 +130,83 @@ diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
 + * There is no console between the loader branch and the point in
 + * kernel_bootstrap() where the screen is acquired: PE_create_console() only
 + * prepares the framebuffer, text is emitted after kPEAcquireScreen. A fault in
-+ * that window is silent, so each checkpoint paints one square into the
++ * that window is silent, so the C half reports progress by painting into the
 + * framebuffer the loader handed over in boot_args.Video[0].
 + *
-+ * The framebuffer is not in the 256 MB boot window, so it is reached in three
-+ * different ways: with the MMU off (and through the V=P bootstrap map, which
-+ * carries block entries for it) it is the physical address itself; after
-+ * arm_vm_init() replaced TTBR0 it is mapped once with ml_io_map_unmappable(),
-+ * exactly like the video console will map it a few calls later.
++ * start.s paints its own six coloured squares on a row at y=140; those prove
++ * that the bootstrap page tables, the MMU and the framebuffer mapping survive
++ * the handover. Everything after that is counted here instead of encoded in
++ * colour, because a photograph of a dim screen cannot tell magenta from purple
++ * but can tell how far down a column of green bars reaches:
 + *
-+ * Stages and colors, in order: 0 white, 1 yellow, 2 cyan, 3 green, 4 blue,
-+ * 5 orange, 6 magenta, 7 purple, 8 teal, 9 red, 10 spring green. A missing
-+ * square is the first checkpoint that did not run.
++ *   one 320x30 bar per checkpoint, starting at (64, 320), 36 pixels per step,
++ *   green until TTBR0 is replaced, cyan afterwards. The bar index of the last
++ *   painted band times 36 plus 320 is the y of its bottom edge, so a photo
++ *   only has to be measured, not counted.
++ *
++ * Three ways to reach the framebuffer, in order of the handover:
++ *   - before arm_vm_init() takes gVirtBase away, the V=P bootstrap map still
++ *     carries block entries for it, so the physical address works;
++ *   - after that, the kernel physmap covers all of RAM, framebuffer included,
++ *     so phystokv() of the physical address works;
++ *   - if the framebuffer is outside reported memory, fall back to the mapping
++ *     the video console itself uses, ml_io_map_unmappable().
 + */
-+#define SAGIT_LADDER_COUNT 11
-+static const uint32_t sagit_ladder_color[SAGIT_LADDER_COUNT] = {
-+	0xFFFFFFFF,     /* 0  loader branch taken */
-+	0xFFFFFF00,     /* 1  bootstrap page tables built */
-+	0xFF00FFFF,     /* 2  translation registers set, MMU off */
-+	0xFF00FF00,     /* 3  MMU on */
-+	0xFF0000FF,     /* 4  end of start.s */
-+	0xFFFF8000,     /* 5  C entry reached, framebuffer recorded */
-+	0xFFFF00FF,     /* 6  arm_init() entered */
-+	0xFF8000FF,     /* 7  arm_vm_init() returned */
-+	0xFF008080,     /* 8  console prepared */
-+	0xFFFF0000,     /* 9  arm_init() finished */
-+	0xFF00FF80,     /* 10 screen acquired, kprintf visible */
-+};
-+
 +#define SAGIT_LADDER_X      64
 +#define SAGIT_LADDER_Y      140
 +#define SAGIT_LADDER_SQUARE 64
 +#define SAGIT_LADDER_STRIDE 80
 +
++#define SAGIT_BAR_X         64
++#define SAGIT_BAR_Y         320
++#define SAGIT_BAR_WIDTH     320
++#define SAGIT_BAR_HEIGHT    30
++#define SAGIT_BAR_STRIDE    36
++#define SAGIT_BAR_MAX       40
++
++#define SAGIT_COLOR_BEFORE  0xFF00FF00      /* green: before the TTBR0 switch */
++#define SAGIT_COLOR_AFTER   0xFF00FFFF      /* cyan: after it */
++
 +static uint64_t sagit_ladder_fb;
 +static uint32_t sagit_ladder_row;
 +static uint64_t sagit_ladder_bytes;
 +static uint64_t sagit_ladder_map;
++static unsigned sagit_bar_next;
++static boolean_t sagit_kva_live;
++
++static void
++sagit_clean(uint64_t vaddr, uint64_t bytes)
++{
++	uint64_t line;
++
++	for (line = vaddr & ~63ULL; line < vaddr + bytes; line += 64) {
++		__asm__ volatile("dc civac, %0" : : "r"(line) : "memory");
++	}
++}
 +
 +static void
 +sagit_ladder_paint(uint64_t fb, uint32_t row_bytes, unsigned stage)
 +{
-+	uint32_t color;
++	uint32_t color = 0;
 +	uint64_t y, x;
 +	uint64_t origin;
 +
-+	if (!fb || !row_bytes || stage >= SAGIT_LADDER_COUNT) {
++	if (!fb || !row_bytes || stage >= 6) {
 +		return;
 +	}
-+	color = sagit_ladder_color[stage];
-+	/* One 64x64 square per stage, on a band below the handoff bar. */
-+	origin = fb + (SAGIT_LADDER_X + stage * SAGIT_LADDER_STRIDE);
++	/*
++	 * Colours of the row start.s paints. Only stage 5 is painted here, the
++	 * one start.s asks for when it hands the framebuffer over.
++	 */
++	switch (stage) {
++	case 0: color = 0xFFFFFFFF; break;
++	case 1: color = 0xFFFFFF00; break;
++	case 2: color = 0xFF00FFFF; break;
++	case 3: color = 0xFF00FF00; break;
++	case 4: color = 0xFF0000FF; break;
++	case 5: color = 0xFFFF8000; break;
++	}
++	origin = fb + (uint64_t)(SAGIT_LADDER_X + stage * SAGIT_LADDER_STRIDE) * 4;
 +
 +	for (y = SAGIT_LADDER_Y; y < SAGIT_LADDER_Y + SAGIT_LADDER_SQUARE; y++) {
 +		uint64_t row = origin + y * row_bytes;
@@ -123,23 +214,42 @@ diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
 +		for (x = 0; x < SAGIT_LADDER_SQUARE * 4; x += 4) {
 +			*(volatile uint32_t *)(uintptr_t)(row + x) = color;
 +		}
-+		/*
-+		 * Rows are 32-byte aligned (rowBytes is 4320), so a 256-byte row
-+		 * touches five cache lines; clean six from the rounded-down
-+		 * address and let the display controller read DRAM.
-+		 */
-+		for (x = 0; x < 6; x++) {
-+			uint64_t line = (row & ~63ULL) + x * 64;
++		sagit_clean(row, SAGIT_LADDER_SQUARE * 4);
++	}
++	__asm__ volatile("dsb sy" : : : "memory");
++}
 +
-+			__asm__ volatile("dc civac, %0" : : "r"(line) : "memory");
++/*
++ * Paints one 320x30 bar and the 6 black rows that separate it from the next
++ * one, so the column reads as a stack of blocks however the photo is exposed.
++ */
++static void
++sagit_bar_paint(uint64_t fb, uint32_t row_bytes, unsigned index, uint32_t color)
++{
++	uint64_t y, x;
++	uint64_t origin;
++
++	if (!fb || !row_bytes || index >= SAGIT_BAR_MAX) {
++		return;
++	}
++	origin = fb + (uint64_t)(SAGIT_BAR_Y + index * SAGIT_BAR_STRIDE) * row_bytes
++	    + (uint64_t)SAGIT_BAR_X * 4;
++
++	for (y = 0; y < SAGIT_BAR_STRIDE; y++) {
++		uint32_t pixel = (y < SAGIT_BAR_HEIGHT) ? color : 0;
++		uint64_t row = origin + y * row_bytes;
++
++		for (x = 0; x < SAGIT_BAR_WIDTH * 4; x += 4) {
++			*(volatile uint32_t *)(uintptr_t)(row + x) = pixel;
 +		}
++		sagit_clean(row, SAGIT_BAR_WIDTH * 4);
 +	}
 +	__asm__ volatile("dsb sy" : : : "memory");
 +}
 +
 +/*
 + * Called from start.s, which has boot_args only as a physical address. Also
-+ * records the framebuffer so the C checkpoints below can paint.
++ * records the framebuffer for the checkpoints below.
 + */
 +void
 +sagit_mark_args(void *args_pa, unsigned stage)
@@ -152,45 +262,161 @@ diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
 +	sagit_ladder_paint(sagit_ladder_fb, sagit_ladder_row, stage);
 +}
 +
++/*
++ * One checkpoint. Paints the next bar of the column and returns.
++ */
 +void
-+sagit_mark(unsigned stage)
++sagit_step(void)
 +{
 +	uint64_t fb = sagit_ladder_fb;
++	uint64_t fb_end = fb + sagit_ladder_bytes;
++	unsigned index = sagit_bar_next;
 +
-+	if (!fb || !sagit_ladder_row) {
++	if (!fb || !sagit_ladder_row || index >= SAGIT_BAR_MAX) {
 +		return;
 +	}
 +
-+	/*
-+	 * Until arm_vm_init() switches TTBR0, the V=P bootstrap map is still in
-+	 * place and the physical address works.
-+	 */
-+	if (gVirtBase == 0) {
-+		sagit_ladder_paint(fb, sagit_ladder_row, stage);
++	if (!sagit_kva_live) {
++		/* V=P bootstrap map, framebuffer at its physical address. */
++		sagit_bar_paint(fb, sagit_ladder_row, index, SAGIT_COLOR_BEFORE);
++		sagit_bar_next = index + 1;
 +		return;
 +	}
 +
-+	/*
-+	 * After that the linear window only covers the 256 MB boot window, and
-+	 * the framebuffer lives above it. Map it once, the way the video console
-+	 * maps it in PE_create_console().
-+	 */
++	if (gPhysSize != 0 && fb >= (uint64_t)gPhysBase &&
++	    fb_end <= (uint64_t)gPhysBase + gPhysSize) {
++		/* The kernel physmap covers all of RAM, framebuffer included. */
++		sagit_bar_paint(phystokv((vm_offset_t)fb), sagit_ladder_row, index,
++		    SAGIT_COLOR_AFTER);
++		sagit_bar_next = index + 1;
++		return;
++	}
++
 +	if (!sagit_ladder_map) {
 +		sagit_ladder_map = ml_io_map_unmappable((vm_offset_t)fb,
 +		    (vm_size_t)sagit_ladder_bytes, VM_WIMG_WCOMB);
 +	}
 +	if (sagit_ladder_map) {
-+		sagit_ladder_paint(sagit_ladder_map, sagit_ladder_row, stage);
++		sagit_bar_paint(sagit_ladder_map, sagit_ladder_row, index,
++		    SAGIT_COLOR_AFTER);
++		sagit_bar_next = index + 1;
 +	}
 +}
 +
  /* 23543331 - step 1 of kext / kernel __TEXT and __DATA colocation is to move
   * all kexts before the kernel.  This is only for arm64 devices and looks
   * something like the following:
-diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+@@ -1830,6 +2013,8 @@
+ 	vm_offset_t      ptpage_vaddr;
+ 	vm_map_address_t dynamic_memory_begin;
+ 
++	sagit_step();		/* vm_init: entered */
++
+ 	/*
+ 	 * Get the virtual and physical kernel-managed memory base from boot_args.
+ 	 */
+@@ -1897,6 +2082,8 @@
+ #endif // ARM_LARGE_MEMORY
+ #endif
+ 
++	sagit_step();		/* vm_init: memory geometry */
++
+ #if KASAN && !defined(ARM_LARGE_MEMORY)
+ 	/* add the KASAN stolen memory to the physmap */
+ 	dynamic_memory_begin = static_memory_end + (shadow_ptop - shadow_pbase);
+@@ -1970,6 +2157,8 @@
+ 	real_avail_end = avail_end;
+ #endif
+ 
++	sagit_step();		/* vm_init: cpu_tte/invalid_tte allocated */
++
+ 	/*
+ 	 * Initialize l1 and l2 page table pages :
+ 	 *   map physical memory at the kernel base virtual address
+@@ -1989,6 +2178,8 @@
+ #endif
+ 
+ 
++	sagit_step();		/* vm_init: kernel window mapped */
++
+ #if __ARM_KERNEL_PROTECT__
+ 	/* Expand the page tables to prepare for the EL0 mappings. */
+ 	arm_vm_expand_kernel_el0_mappings();
+@@ -2068,6 +2259,8 @@
+ 	}
+ 
+ 	(void) PE_parse_boot_argn("use_contiguous_hint", &use_contiguous_hint, sizeof(use_contiguous_hint));
++	sagit_step();		/* vm_init: segments resolved */
++
+ 	assert(segSizePRELINKTEXT < 0x03000000); /* 23355738 */
+ 
+ 	/* if one of the new segments is present, the other one better be as well */
+@@ -2103,6 +2296,8 @@
+ 
+ 	arm_vm_prot_init(args);
+ 
++	sagit_step();		/* vm_init: arm_vm_prot_init */
++
+ 	/*
+ 	 * Initialize the page tables for the low globals:
+ 	 *   cover this address range:
+@@ -2115,6 +2310,8 @@
+ 	*cpu_l2_tte = (kvtophys(ptpage_vaddr) & ARM_TTE_TABLE_MASK) | ARM_TTE_TYPE_TABLE | ARM_TTE_VALID | ARM_TTE_TABLE_PXN | ARM_TTE_TABLE_XN;
+ 	bzero((void *)ptpage_vaddr, ARM_PGBYTES);
+ 
++	sagit_step();		/* vm_init: low globals mapped */
++
+ 	/*
+ 	 * Initialize l2 page table pages :
+ 	 *   cover this address range:
+@@ -2134,6 +2331,8 @@
+ 	init_ptpages(cpu_tte, dynamic_memory_begin, VM_MAX_KERNEL_ADDRESS, TRUE, ARM_DYNAMIC_TABLE_XN | ARM_TTE_TABLE_AP(ARM_TTE_TABLE_AP_USER_NA));
+ #endif
+ 
++	sagit_step();		/* vm_init: dynamic range mapped */
++
+ #if KASAN
+ 	/* record the extent of the physmap */
+ 	physmap_vbase = physmap_base;
+@@ -2145,6 +2344,8 @@
+ 	mt_early_init();
+ #endif /* CONFIG_CPU_COUNTERS */
+ 
++	sagit_step();		/* vm_init: cpu counters, before physmap */
++
+ 	arm_set_user_tbi();
+ 
+ 	arm_vm_physmap_init(args);
+@@ -2162,6 +2363,9 @@
+ 	cpu_tte = (tt_entry_t*)(phystokv(cpu_ttep));
+ 	invalid_tte = (tt_entry_t*)(phystokv(invalid_ttep));
+ 
++	sagit_kva_live = TRUE;
++	sagit_step();		/* vm_init: TTBR0 replaced, KVA live */
++
+ 	// From here on out, we're off the bootstrap translation tables.
+ 
+ 
+@@ -2255,6 +2459,8 @@
+ #endif
+ 	pmap_bootstrap(dynamic_memory_begin);
+ 
++	sagit_step();		/* vm_init: pmap_bootstrap */
++
+ 	disable_preemption();
+ 
+ 	/*
+@@ -2378,6 +2584,7 @@
+ 	pmap_static_allocations_done();
+ #endif
+ 	first_avail = avail_start;
++	sagit_step();		/* vm_init: done */
+ 	patch_low_glo_static_region(args->topOfKernelData, avail_start - args->topOfKernelData);
+ 	enable_preemption();
+ }
 --- a/osfmk/arm64/start.s
 +++ b/osfmk/arm64/start.s
-@@ -456,6 +456,64 @@
+@@ -456,6 +456,99 @@
  .endmacro
  
  /*
@@ -199,55 +425,90 @@ diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
 + * XNU acquires the screen only late in kernel_bootstrap(), so a fault anywhere
 + * between the loader branch and that point leaves no output at all. Paint the
 + * square for \stage directly into the handoff framebuffer instead: one 64x64
-+ * block at y=140, x=64+stage*80. The color comes from the caller in w15 and
-+ * the stage number from the caller in the offset.
++ * block at y=140, x=64+stage*80.
 + *
 + * The boot_args structure lives at physical address x20 for the whole of
-+ * start.s, and both V=P maps (bootstrap and, with the MMU off, the raw
-+ * physical address) reach it. The framebuffer also gets V=P block entries in
-+ * Lbootstrap_tables_ready, so the same physical address is valid before and
-+ * after the MMU comes on.
++ * start.s. The framebuffer is not inside the 256 MB boot window (the loader
++ * hands over window 0x44c04000..0x54c04000 while SimpleFb lives at
++ * 0x9d400000), so Lbootstrap_tables_ready gives it its own L2 table in the V=P
++ * map. Without that the first store after the MMU comes on takes a
++ * translation fault and the ladder stops at stage 2.
 + *
-+ * Clobbers x9-x13 and x16/x17; no stack is used.
++ * SAGIT_FILL takes x17 as the pixel address of the square's top-left corner,
++ * x10 as v_rowBytes and w15 as the colour. It clobbers x11-x13 and w16 and
++ * cleans every line it touched, because the V=P map is write-back while the
++ * display controller scans DRAM.
 + */
-+.macro SAGIT_LADDER stage
-+	ldr		x9, [x20, #0x28]			// boot_args.Video.v_baseAddr
-+	bic		x9, x9, #3
-+	cbz		x9, 9f
-+	ldr		x10, [x20, #0x38]			// boot_args.Video.v_rowBytes
-+	cbz		x10, 9f
-+	add		x17, x9, #(64 + (\stage) * 80)		// square origin
-+
-+	/* Fill 64 rows of 64 pixels, two pixels per store. */
-+	mov		x11, #140
-+	add		x12, x11, #64
-+1:	madd		x13, x11, x10, x17
-+	mov		w16, #32
-+2:	stp		w15, w15, [x13], #8
++.macro SAGIT_FILL
++	mov		x12, x17
++	mov		w11, #64
++1:	mov		w16, #32
++2:	stp		w15, w15, [x17], #8
 +	subs		w16, w16, #1
 +	b.ne		2b
-+	add		x11, x11, #1
-+	cmp		x11, x12
-+	b.lo		1b
++	add		x17, x17, x10
++	sub		x17, x17, #256
++	subs		w11, w11, #1
++	b.ne		1b
 +
 +	/*
-+	 * The V=P map is write-back and the display controller scans DRAM, so
-+	 * clean the lines the square touches. A row is 256 bytes but rows are
-+	 * only 32-byte aligned (rowBytes is 4320), hence six lines from the
-+	 * rounded-down address; over-cleaning is harmless.
++	 * A row is 256 bytes but rows are only 32-byte aligned (rowBytes is
++	 * 4320), hence six lines from the rounded-down address; over-cleaning
++	 * is harmless.
 +	 */
-+	mov		x11, #140
-+1:	madd		x13, x11, x10, x17
++	mov		x17, x12
++	mov		w11, #64
++1:	mov		x13, x17
 +	bic		x13, x13, #63
 +	mov		w16, #6
 +2:	dc		civac, x13
 +	add		x13, x13, #64
 +	subs		w16, w16, #1
 +	b.ne		2b
-+	add		x11, x11, #1
-+	cmp		x11, x12
-+	b.lo		1b
++	add		x17, x17, x10
++	subs		w11, w11, #1
++	b.ne		1b
 +	dsb		sy
++.endmacro
++
++.macro SAGIT_LADDER stage
++	ldr		x9, [x20, #0x28]			// boot_args.Video.v_baseAddr
++	bic		x9, x9, #3
++	cbz		x9, 9f
++	ldr		x10, [x20, #0x38]			// boot_args.Video.v_rowBytes
++	cbz		x10, 9f
++	add		x17, x9, #(4 * (64 + (\stage) * 80))	// square origin, bytes
++	mov		x11, #140
++	madd	x17, x11, x10, x17
++	SAGIT_FILL
++9:
++.endmacro
++
++/*
++ * Translate \reg with the MMU still off. AT S1E1R consults TTBR0/TCR_EL1
++ * whatever SCTLR_EL1.M says, so this is the pre-flight check for the tables
++ * the MMU is about to use: PAR_EL1.F clear means the address resolves, set
++ * means it would fault. Green square for resolve, red for fault, at \yy.
++ */
++.macro SAGIT_PROBE reg, xoff, yy
++	at		s1e1r, \reg
++	isb
++	mrs		x16, PAR_EL1
++	tst		x16, #1					// PAR_EL1.F
++	movz	w15, #0xFF00
++	movk	w15, #0xFF00, lsl #16			// green: TTBR0 reaches it
++	b.eq		8f
++	movz	w15, #0x0000
++	movk	w15, #0xFFFF, lsl #16			// red: translation fault
++8:	ldr		x9, [x20, #0x28]
++	bic		x9, x9, #3
++	cbz		x9, 9f
++	ldr		x10, [x20, #0x38]
++	cbz		x10, 9f
++	add		x17, x9, #(4 * (\xoff))			// probe origin, bytes
++	mov		x11, #(\yy)
++	madd	x17, x11, x10, x17
++	SAGIT_FILL
 +9:
 +.endmacro
 +
@@ -255,7 +516,7 @@ diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
   * _start_first_cpu
   * Cold boot init routine.  Called from __start
   *   x0 - Boot args
-@@ -513,6 +571,11 @@
+@@ -513,6 +606,11 @@
  	msr		SPSel, #0							// Set SP_EL0 to interrupt stack
  	mov		sp, x0
  
@@ -267,7 +528,7 @@ diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
  	// Load address to the C init routine into link register
  	adrp	lr, EXT(arm_init)@page
  	add		lr, lr, EXT(arm_init)@pageoff
-@@ -626,6 +689,61 @@
+@@ -626,6 +724,79 @@
  	/* Ensure TTEs are visible */
  	dsb		ish
  
@@ -279,11 +540,14 @@ diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
 +
 +	/*
 +	 * The loader keeps the framebuffer outside the kernel window (SimpleFb
-+	 * lives at 0x9d400000 on this SoC), but the later checkpoints paint into
-+	 * it with the MMU on. Add block entries for it to the V=P map while the
-+	 * tables are still writable. It shares the L1 slot with the kernel
-+	 * window, so the L2 table already exists; a missing table means the
-+	 * layout is not what we expect and the checkpoints stay unavailable.
++	 * lives at 0x9d400000 on this SoC while the window is at 0x44c04000),
++	 * but the later checkpoints paint into it with the MMU on. Add block
++	 * entries for it to the V=P map while the tables are still writable.
++	 * It is normally in a different 1 GB region than the kernel window, so
++	 * its L1 slot is still empty; in that case take the last page of the
++	 * reserved bootstrap pool, which the allocator (it starts at the fourth
++	 * page and needs one L2 per gigabyte of window) does not reach for the
++	 * 256 MB window.
 +	 */
 +	ldr		x6, [x20, #0x28]			// boot_args.Video.v_baseAddr
 +	bic		x6, x6, #3
@@ -309,7 +573,22 @@ diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
 +	add		x9, x25, x9
 +	ldr		x10, [x9]
 +	and		x10, x10, #(ARM_TTE_TABLE_MASK)
-+	cbz		x10, 9f
++	cbnz		x10, 8f
++
++	mov		x10, #(BOOTSTRAP_TABLE_BYTES - PGBYTES)
++	add		x10, x25, x10
++	mov		x12, xzr
++	mov		w11, #(TTE_PGENTRIES)
++7:	str		x12, [x10], #(1 << TTE_SHIFT)
++	subs		w11, w11, #1
++	b.ne		7b
++	mov		x10, #(BOOTSTRAP_TABLE_BYTES - PGBYTES)
++	add		x10, x25, x10
++	mov		x12, #(ARM_TTE_BOOT_TABLE)
++	orr		x12, x12, x10
++	str		x12, [x9]
++	dsb		ish
++8:
 +
 +	and		x11, x6, #(ARM_TT_L2_INDEX_MASK)
 +	lsr		x11, x11, #(ARM_TT_L2_SHIFT)
@@ -329,7 +608,7 @@ diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
  
  	b		common_start
  
-@@ -761,11 +879,23 @@
+@@ -761,11 +932,38 @@
  	PAC_INIT_KEY_STATE tmp=x0, tmp2=x1
  #endif /* HAS_APPLE_PAC */
  
@@ -338,6 +617,21 @@ diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
 +	movz	w15, #0xFFFF
 +	movk	w15, #0xFF00, lsl #16
 +	SAGIT_LADDER 2
++
++	/*
++	 * Pre-flight the tables with the MMU still off. Green at y=240 means
++	 * TTBR0 resolves the address, red means the first access after the MMU
++	 * comes on would fault. Left to right: this instruction, the
++	 * framebuffer, the boot args. A red framebuffer square here (the third
++	 * failed attempt at stage 3) would mean the block entries did not reach
++	 * the L2 table, which is exactly what the L1 fallback above prevents.
++	 */
++	adr		x14, .
++	SAGIT_PROBE x14, 64, 240
++	ldr		x14, [x20, #0x28]
++	bic		x14, x14, #3
++	SAGIT_PROBE x14, 144, 240
++	SAGIT_PROBE x20, 224, 240
 +
  	// Enable caches, MMU, ROP and JOP
  	MOV64   x0, SCTLR_EL1_DEFAULT
@@ -353,7 +647,7 @@ diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
  #if !VMAPPLE
  	MOV64   x1, SCTLR_EL1_DEFAULT
  	cmp		x0, x1
-@@ -810,6 +940,19 @@
+@@ -810,6 +1008,19 @@
  	msr		CPU_OVRD, x9
  #endif
  
@@ -373,7 +667,6 @@ diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
  	// If x21 != 0, we're doing a warm reset, so we need to trampoline to the kernel pmap.
  	cbnz	x21, Ltrampoline
  
-diff --git a/osfmk/kern/startup.c b/osfmk/kern/startup.c
 --- a/osfmk/kern/startup.c
 +++ b/osfmk/kern/startup.c
 @@ -136,6 +136,9 @@
@@ -381,7 +674,7 @@ diff --git a/osfmk/kern/startup.c b/osfmk/kern/startup.c
  #endif
  
 +/* Bring-up ladder checkpoint, painted into the framebuffer from arm_vm_init.c. */
-+extern void sagit_mark(unsigned stage);
++extern void sagit_step(void);
 +
  #if CONFIG_XNUPOST
  #include <tests/ktest.h>
@@ -390,7 +683,7 @@ diff --git a/osfmk/kern/startup.c b/osfmk/kern/startup.c
  	 */
  	initialize_screen(NULL, kPEAcquireScreen);
  
-+	sagit_mark(10);
++	sagit_step();		/* startup: screen acquired */
 +
  	/*
  	 *	Initialize the shared region module.
