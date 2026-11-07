@@ -12,6 +12,13 @@ It does **not** contain the graphics stack. The GPU runtime for Adreno a5xx
 <https://github.com/ilertnost/Adrenoline>. The payload menu entry is still
 called *Adrenoline* because that is the system being booted.
 
+The line between the two is fixed: everything that talks to the GPU — the
+IOKit driver, firmware loading, ring submission, shaders — is in Adrenoline.
+This repository keeps the boot chain and, at most, basic software rendering
+into the framebuffer: the bring-up ladder, console text, a blit or a simple
+rasteriser for the panel before the driver exists. Bring-up diagnostics must
+keep working while the GPU does not.
+
 ## Provenance and licences
 
 This project is **not a fork** of <https://github.com/MC-XiaoXiao/ios_sagit>,
