@@ -1,0 +1,6 @@
+# Device patch series. Application order matters: the boot ladder has to be
+# the very last patch applied, because its insertion points sit in the context
+# that native-4k-bootstrap-capacity.patch and zzz-boot-progress.patch use for
+# their own reverse checks. Paths are relative to this file.
+../0007-sagit-cpu-clusters.patch
+../0006-sagit-boot-ladder.patch

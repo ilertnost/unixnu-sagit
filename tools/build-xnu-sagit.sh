@@ -2,34 +2,32 @@
 # Build XNU for the Xiaomi Mi 6 (sagit) from the UniXNU base.
 #
 # Source tree: the UniXNU checkout that carries the Linux toolchain driver.
-# The device profile lives in this repository under kernel/sagit, and everything
-# in it is ours.
+# The device repository is this repository itself (format-2 board.toml at its
+# root), and everything in it is ours.
 #
 # Usage:
 #   SRC=/path/to/unixnu-src TOOLCHAIN=/path/to/unixnu-toolchain \
 #     tools/build-xnu-sagit.sh
 #
-# Output: $SRC/out/sagit/tree/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/
+# Output: $SRC/out/sagit/ipados-17.7.11-21H461/sagit/tree/build/xnu/
+#         ios-obj/DEVELOPMENT_ARM64_BCM2837/
 #         mach.development.bcm2837.unstripped.noctf
 
 set -eo pipefail
 
 SRC=${SRC:-/data/opencode/unixnu-src}
 TOOLCHAIN=${TOOLCHAIN:-/data/opencode/unixnu-toolchain}
-DEVICE_DIR=$(cd "$(dirname "$0")/.." && pwd)/kernel/sagit
-PATCHES=$(cd "$(dirname "$0")/.." && pwd)/patches
+DEVICE_DIR=$(cd "$(dirname "$0")/.." && pwd)
+PATCHES="$DEVICE_DIR/patches"
 
 # LLVM is several gigabytes of intermediate objects; keep them off the root
 # filesystem, which is small on this host.
 export TMPDIR=${TMPDIR:-/data/opencode/tmp}
 export UNIXNU_TOOLCHAIN="$TOOLCHAIN"
 
-# The build script applies $SRC/patches/xnu/*.patch with a shell glob. In a
-# UTF-8 locale the collation ignores the dash, so "zzyb-" sorts before "zzy-"
-# and the optional observation hooks are applied before the patch their context
-# comes from. C collation puts them back in byte order, which is the order the
-# script's own comment describes ("reverse newest first, re-apply in name
-# order").
+# In a UTF-8 locale the collation ignores the dash, so "zzyb-" sorts before
+# "zzy-" and an optional observation hook would be applied before the patch
+# its context comes from. C collation puts them back in byte order.
 export LC_ALL=C
 
 # The shims in the toolchain default to /opt/unixnu-linux, which is not where
@@ -47,45 +45,10 @@ if ! grep -q 'A source-only board has no \[kernel.prelink\]' "$SRC/scripts/unixn
   git -C "$SRC" apply "$PATCHES/0003-unixnu-prelink-when-specified.patch"
 fi
 
-# The bring-up ladder is a device patch and has to be applied after every
-# shared XNU patch, because it inserts code in the middle of hunks those touch
-# (start.s bootstrap tables, arm_init's init sequence). The format-1 build
-# applies $SRC/patches/xnu/*.patch in filename order and skips what is already
-# applied, so a "zzzz-" name puts it last and keeps it idempotent.
-LADDER="$SRC/patches/xnu/zzzz-sagit-boot-ladder.patch"
-if ! cmp -s "$PATCHES/0006-sagit-boot-ladder.patch" "$LADDER"; then
-  install -m 0644 "$PATCHES/0006-sagit-boot-ladder.patch" "$LADDER"
-fi
-
-# The board config is a device patch too, but it touches a header no shared patch
-# looks at, so it needs no reverse/applied dance: the build's own idempotent
-# match keeps it applied once and skips it afterwards.
-CLUSTERS="$SRC/patches/xnu/zzzz-sagit-cpu-clusters.patch"
-if ! cmp -s "$PATCHES/0007-sagit-cpu-clusters.patch" "$CLUSTERS"; then
-  install -m 0644 "$PATCHES/0007-sagit-cpu-clusters.patch" "$CLUSTERS"
-fi
-
-# ...and it has to be *unapplied* before the build starts. The build script
-# reverse-checks every patch to decide whether it still has to apply it, and
-# the ladder inserts lines into the context that
-# native-4k-bootstrap-capacity.patch and zzz-boot-progress.patch use for their
-# own reverse-check. Leaving it in place makes those look unapplied, so the
-# build tries to apply them again and fails. Reversing it here leaves a tree
-# that is exactly "all shared patches applied"; the filename order then puts
-# the ladder back on the very last pass.
-#
-# The cluster patch needs the same treatment for the same reason: it rewrites
-# the MAX_CPU_CLUSTERS line that sits three lines below MAX_CPUS in the hunk
-# native-smp-secondary.patch uses to recognise itself. With the cluster patch
-# left applied, that shared patch looks unapplied and the build tries to apply
-# it a second time, which fails on both files it touches.
-WORK="$SRC/out/sagit/tree/.cache/xnu-work"
-for PATCH in "$LADDER" "$CLUSTERS"; do
-  if git -C "$WORK" rev-parse --git-dir >/dev/null 2>&1 &&
-     git -C "$WORK" apply --reverse --check "$PATCH" 2>/dev/null; then
-    git -C "$WORK" apply --reverse "$PATCH"
-  fi
-done
+# The device patch series (patches/xnu/series) carries the bring-up ladder
+# and the CPU-cluster fix. The resolver applies the full selected series —
+# arch, SoC, OS, then device, ladder last — on a fresh clone whenever the
+# inputs change, so no install-into-the-shared-glob dance is needed any more.
 
 cd "$SRC"
 
@@ -95,7 +58,12 @@ echo "== config =="
 echo "== kernel =="
 ./unixnu build kernel
 
-KERNEL="$SRC/out/sagit/tree/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837.unstripped.noctf"
+KERNEL="$SRC/out/sagit/ipados-17.7.11-21H461/sagit/tree/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837.unstripped.noctf"
+if [ ! -f "$KERNEL" ]; then
+  # Fall back to the format-1 output location while the first format-2 build
+  # is being verified.
+  KERNEL="$SRC/out/sagit/tree/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837.unstripped.noctf"
+fi
 echo "== output =="
 ls -l "$KERNEL"
 sha256sum "$KERNEL"

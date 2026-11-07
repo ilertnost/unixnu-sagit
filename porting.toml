@@ -1,0 +1,200 @@
+schema_version = 1
+
+[device]
+name = "sagit"
+soc = "MSM8998"
+os_profile = "ipados-17.7.11-21H461"
+summary = "RAM-rooted XNU bring-up on the Mi 6: the boot ladder reaches checkpoint 35 (past pmap_bootstrap); the wall is now inside the STARTUP_SUB_KPRINTF startup batch. Firmware stays on edk2 for one more bring-up attempt, then moves to Mu-Silicium. GPU stack is a separate project (Adrenoline)."
+
+[[area]]
+id = "configuration"
+status = "implemented"
+components = ["ArmDTPlatform", "ArmCpu", "XnuPrelink"]
+paths = ["board.toml", "feeds.toml", "unixnu.lock", "configs/**", "soc/**", "patches/xnu/series", "old/README.md"]
+inputs = ["Mi 6 (sagit), MSM8998, 4+4 big.LITTLE, 4 or 6 GB DRAM; firmware-advertised window 0x40000000..0x130000000 (PcdSystemMemorySize 0xF0000000)."]
+configuration = ["Format-2 board.toml with the local msm8998 SoC profile (soc.toml, msm8998.config, dtsi with cluster-type E/P, empty SoC series) copied from the same-author OnePlus 5 migration; device defconfig selects source crypto, pthread and mockfs so a storage-less kernel links."]
+procedure = ["./unixnu defconfig sagit_defconfig -D <repo>; ./unixnu status --json; ./unixnu tree; dtc compile of dts/sagit.dts against soc:dts."]
+findings = ["MSM8998 raises UNDEF on MSR PAN, so ARMv8.0 paths are forced; the BCM build-template panic address must never be touched on this SoC (CONFIG_XNU_DT_PANIC_REGION). The ladder patch must stay the last entry of the selected series: its insertion points sit in the context other patches reverse-check."]
+completion = ["All source pins resolve; patch order ends with 0006-sagit-boot-ladder.patch; output resolves to out/sagit/ipados-17.7.11-21H461/sagit."]
+limits = ["MSM8998 SoC support is local and unpublished; feeds.toml pins it as a local source, not a reviewed commit."]
+next_action = ["Publish UniXNU-msm8998-common and replace the local pin with its reviewed commit."]
+evidence = [
+  { kind = "source", reference = "docs/XNU-SAGIT.md", result = "Bring-up ladder, checkpoint table and the patch-ordering rule are documented in the device record" },
+  { kind = "source", reference = "soc/msm8998/AGENTS.md", result = "Provenance of the local SoC migration inputs" },
+]
+
+[[area]]
+id = "firmware"
+status = "planned"
+components = ["DarwinBoot"]
+paths = ["firmware/**", "tools/build-sagit-edk2.sh", "tools/apply-edk2-unixnu-overlay.sh", "proprietary-files.txt"]
+inputs = ["edk2-porting/edk2-msm8998 (branch new) with SagitPkg (SagitRamDiskDxe, SagitReportDxe) and DarwinBoot with sagit framebuffer patches 0004/0005."]
+configuration = ["The firmware flow stays on edk2 for one more bring-up attempt; the Mu-Silicium port (uefi-sagit) follows after it."]
+procedure = ["tools/build-sagit-edk2.sh builds the UEFI firmware and packages boot-sagit.img via mkbootimg."]
+findings = ["DarwinBoot reports MemorySize = WindowSize (the one contiguous 256 MB conventional window 0x44C04000..0x54C04000), so XNU physmap does not cover the framebuffer at 0x9d400000; the kernel maps its own alias before the TTBR0 switch."]
+completion = ["A Mu-Silicium uefi-sagit firmware builds from the official [firmware] board.toml entry and boots the same payload."]
+limits = ["Firmware is not yet on the official Mu-Silicium model; the edk2 flow is a knowingly temporary bring-up path."]
+next_action = ["Flash boot-sagit.img (sha256 3f995278...), read the startup-hook sub-ladder photo, bisect the STARTUP_SUB_KPRINTF batch; then start the Mu-Silicium port."]
+evidence = []
+
+[[area]]
+id = "cpu"
+status = "planned"
+components = ["ArmCpu"]
+paths = ["soc/msm8998/dts/msm8998.dtsi", "patches/0007-sagit-cpu-clusters.patch", "dts/sagit.dts"]
+inputs = ["4x Cortex-A53 (affinity 0x0-0x3) + 4x Cortex-A73 (0x100-0x103), GICv3 at 0x17a00000/0x17b00000, stride 0x20000, 19.2 MHz generic timer."]
+configuration = ["The DTSI describes all eight cores with unixnu,cluster-type E/P and PSCI SMC enable; the kernel currently runs one CPU during bring-up (MAX_CPU_CLUSTERS 2 in patch 0007)."]
+procedure = ["Boot ladder checkpoints paint CPU topology steps; secondary cores start through the PSCI method exported into the ADT."]
+findings = ["The cluster fix (0007) was the first kernel change verified on hardware: the boot photo stopped at a later checkpoint after it."]
+completion = ["All eight cores enumerate with the correct Apple cluster-type values on hardware."]
+limits = ["Single-CPU bring-up stage; cluster enumeration is unverified on hardware."]
+next_action = ["Pass the KPRINTF wall, then enable the secondary clusters."]
+evidence = []
+
+[[area]]
+id = "memory"
+status = "implemented"
+components = []
+paths = ["patches/0006-sagit-boot-ladder.patch", "docs/XNU-SAGIT.md"]
+inputs = ["Framebuffer at 0x9d400000 outside the 256 MB kernel window; physmap geometry static_memory_end == physmap_end for this board."]
+configuration = ["The boot ladder (0006) paints checkpoints and a decimal counter into the framebuffer across the MMU-off, V=P and kernel-table views; sagit_map_fb() aliases the framebuffer into the physmap padding before the TTBR0 switch and reaches it through the V=P map, not phystokv()."]
+procedure = ["One boot photograph reads the checkpoint counter and the phase/sub-ladder squares; docs/XNU-SAGIT.md maps every number to a source point."]
+findings = ["Three real bugs were found and fixed on hardware through the ladder: the framebuffer left the painter blind after the TTBR0 switch; init_ptpages() leaves the top 1 GB slot empty (gVirtBase sits 112 MB into its slot); phystokv() answers with physmap addresses before TTBR1 points at cpu_tte, so the alias must use sagit_pa_to_va(). The ladder then reached checkpoint 35."]
+completion = ["The ladder covers every checkpoint from _start_first_cpu to launchd with no blind window."]
+limits = ["Checkpoint 35 is the current wall: the STARTUP_SUB_KPRINTF startup batch (single entry _PE_init_kprintf) is being bisected."]
+next_action = ["Read the startup-hook sub-ladder from the next boot photo."]
+evidence = [
+  { kind = "source", reference = "docs/XNU-SAGIT.md", result = "Checkpoint table with phases 91-97, the framebuffer alias sub-ladder and the current wall" },
+]
+
+[[area]]
+id = "storage"
+status = "planned"
+components = ["RamBlock"]
+paths = ["configs/sagit_defconfig", "tools/mksagit-payload.py"]
+inputs = ["No storage driver in this stage: the kernel mounts an in-memory root (mockfs fixture) from the payload ramdisk."]
+configuration = ["CONFIG_XNU_NATIVE_UFS=n; RamBlock is included for the sparse seed storage path once storage bring-up starts."]
+procedure = ["Keep the storage-less link working while the UFS driver is adapted separately."]
+findings = ["The storage-less link requires the source crypto, pthread and mockfs archives in exactly that order; the namespaced corecrypto pass must follow the plain one."]
+completion = ["UFS on the Mi 6 reads and writes through the XNU storage stack."]
+limits = ["Storage is intentionally out of the current bring-up stage."]
+next_action = ["After the KPRINTF wall falls, adapt the UFS transport for MSM8998."]
+evidence = []
+
+[[area]]
+id = "display"
+status = "planned"
+components = []
+paths = ["dts/sagit.dts", "docs/XNU-SAGIT.md"]
+inputs = ["Frame buffer base 0x9d400000 handed over by DarwinBoot (video base in boot_args)."]
+configuration = ["Display bring-up is limited to the firmware GOP framebuffer the ladder paints into; no display driver yet."]
+procedure = ["The ladder uses the raw framebuffer as its diagnostics canvas."]
+findings = ["The boot menu redraws the framebuffer between boots and covers the middle of the ladder column, which is why the counter was added to the corners."]
+completion = ["A display driver drives the panel through the native graphics stack."]
+limits = ["Panel, backlight and display pipeline are untouched."]
+next_action = ["Keep the framebuffer diagnostics stable while the GPU stack lands in Adrenoline."]
+evidence = []
+
+[[area]]
+id = "input"
+status = "planned"
+components = []
+paths = ["docs/HOME-BUTTON.md", "docs/SAGIT-GPIO-MAP.md"]
+inputs = ["GPIO map and home button wiring documented for this board."]
+configuration = ["No input driver in this stage."]
+procedure = ["Input adaptation starts after the display and GPU path works."]
+findings = ["The GPIO map and home-button notes were captured from the board before bring-up."]
+completion = ["Touch and buttons report events through the XNU HID stack."]
+limits = ["No input hardware has been exercised yet."]
+next_action = ["Map the input transport once the userspace stage begins."]
+evidence = []
+
+[[area]]
+id = "gpu"
+status = "planned"
+components = []
+paths = ["docs/ADR-0003-boot-chain.md"]
+inputs = ["Adreno 540 (a5xx family) in the Mi 6."]
+configuration = ["Per ADR-0003 the GPU stack (IOKit driver, firmware loading, ring submission, Metal frontend, NIR, PM4/Gallium backends) lives only in the Adrenoline repository; unixnu-sagit consumes the resulting kexts and keeps only a basic software framebuffer renderer for diagnostics."]
+procedure = ["Adrenoline develops the driver; this repository tracks the boundary and consumes kexts."]
+findings = ["The boundary decision was made to keep diagnostics working when the GPU path is broken: the ladder needs nothing but the framebuffer."]
+completion = ["Adrenoline kexts load in the XNU runtime on this board."]
+limits = ["No GPU code lives in this repository by design."]
+next_action = ["Keep the repository boundary; revisit when Adrenoline reaches a6xx-compatible bring-up readiness for a5xx."]
+evidence = [
+  { kind = "source", reference = "docs/ADR-0003-boot-chain.md", result = "Repository boundary: GPU stack in Adrenoline, boot chain here" },
+]
+
+[[area]]
+id = "network"
+status = "not-applicable"
+components = []
+paths = ["docs/XNU-SAGIT.md"]
+inputs = ["Broadcom 4357 Wi-Fi noted in the ADT identity data; no network bring-up in this stage."]
+configuration = ["Networking is out of scope until userspace exists."]
+procedure = ["No network procedure in this stage."]
+findings = ["The ADT identity half mirrors the Wi-Fi chipset string for later use."]
+completion = ["Not applicable in this stage."]
+limits = ["No network hardware has been exercised."]
+next_action = ["Revisit after storage and display."]
+evidence = []
+
+[[area]]
+id = "audio"
+status = "not-applicable"
+components = []
+paths = ["docs/XNU-SAGIT.md"]
+inputs = ["No audio bring-up in this stage."]
+configuration = ["Audio is out of scope until userspace exists."]
+procedure = ["No audio procedure in this stage."]
+findings = ["Nothing observed yet."]
+completion = ["Not applicable in this stage."]
+limits = ["No audio hardware has been exercised."]
+next_action = ["Revisit with the DSP work."]
+evidence = []
+
+[[area]]
+id = "power"
+status = "planned"
+components = []
+paths = ["docs/XNU-SAGIT.md"]
+inputs = ["PSCI SMC is the CPU power method; regulator and charger drivers are not started."]
+configuration = ["Power management is limited to what PSCI provides during bring-up."]
+procedure = ["Record power observations that affect boot (resets, watchdog) in the ladder findings."]
+findings = ["No watchdog interference observed up to checkpoint 35."]
+completion = ["A power driver manages regulators and charging through XNU."]
+limits = ["No PMIC driver in this stage."]
+next_action = ["Watchdog behaviour once the kernel reaches userspace."]
+evidence = []
+
+[[area]]
+id = "packaging"
+status = "implemented"
+components = []
+paths = ["tools/mksagit-payload.py", "tools/build-sagit-edk2.sh", "tools/build-xnu-sagit.sh", "scripts/package.sh", "board.toml"]
+inputs = ["Android boot image v1, pagesize 2048, base 0x10000000; payload FAT volume ADRENOLINE, 24 MiB, pinned timestamps."]
+configuration = ["The packaging flow is the device's own scripts (kernel -> payload volume -> firmware -> boot image); the official ./unixnu payload/bootimg steps take over when the firmware moves to Mu-Silicium."]
+procedure = ["tools/build-xnu-sagit.sh builds the kernel; tools/mksagit-payload.py packs the payload; tools/build-sagit-edk2.sh builds the firmware and packages boot-sagit.img."]
+findings = ["The payload layout is fixed: /EFI/UniXNU/{unixnu.toml, Payloads/kernel.macho, Payloads/kernel.macho.adt}; two runs with the same arguments produce identical bytes except the ADT random seed."]
+completion = ["The same two artifacts build from a clean checkout with no edits."]
+limits = ["scripts/package.sh is a thin wrapper today; the official packaging action replaces it with the Mu-Silicium firmware."]
+next_action = ["Wire scripts/package.sh to the official ./unixnu bootimg once the firmware model moves."]
+evidence = [
+  { kind = "source", reference = "docs/FIRMWARE-PAYLOAD.md", result = "Payload volume layout and packaging flow are documented" },
+]
+
+[[area]]
+id = "diagnostics"
+status = "implemented"
+components = []
+paths = ["patches/0006-sagit-boot-ladder.patch", "docs/XNU-SAGIT.md", "tools/startup-entries.py"]
+inputs = ["The framebuffer is the only diagnostics channel that survives early faults; serial exists only on Apple hardware."]
+configuration = ["The boot ladder paints bars, a decimal checkpoint counter, phase markers 91-99 and sub-ladder rows into the framebuffer from _start_first_cpu through the startup hooks; tools/startup-entries.py lists the kernel startup hook table in execution order."]
+procedure = ["Boot, photograph the screen, read the counter and squares against the table in docs/XNU-SAGIT.md."]
+findings = ["Numbers 91-99 are reserved for phase markers so they cannot be mistaken for checkpoints; the startup-hook loop erases its sub-ladder row every iteration so the last frame shows only the fatal entry."]
+completion = ["Every bring-up stage has a visible checkpoint and a documented reading."]
+limits = ["No serial or USB log channel on this board yet (ADR-0006 records the USB-log plan)."]
+next_action = ["Bisect the STARTUP_SUB_KPRINTF batch with the startup-hook sub-ladder."]
+evidence = [
+  { kind = "source", reference = "docs/XNU-SAGIT.md", result = "Ladder semantics, checkpoint table and reading instructions" },
+]

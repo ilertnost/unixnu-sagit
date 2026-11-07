@@ -1,0 +1,13 @@
+# MSM8998 SoC patch series. The ARM64 series assumes two base patches that
+# the legacy filename glob applied but the series does not name; both belong
+# to the SoC layer and must apply before the OS series (whose
+# zzz-boot-progress.patch quotes the bsd_init.c block that
+# sheng-platform-power.patch inserts; the sirius device record hit the same
+# context mismatch on its first format-2 build).
+#
+# CONFIG_XNU_SHENG_PMGR is off on this board, so sheng-platform-power's code
+# compiles to nothing — it only supplies context. native-smp-secondary sets
+# MAX_CPUS 8 and the Affinity1 core numbering that 0007-sagit-cpu-clusters
+# rewrites for the Mi 6 cluster layout.
+arch:../../../patches/xnu/native-smp-secondary.patch
+arch:../../../patches/xnu/sheng-platform-power.patch

@@ -1,0 +1,5 @@
+# Required firmware inputs: relative path | source | SHA-256 | consumer
+# Fill each entry from this board's firmware package. The Mi 6 bring-up stage
+# currently needs no proprietary blobs: the payload volume is generated and
+# the firmware builds from source (edk2-msm8998 + SagitPkg + DarwinBoot).
+# GPU firmware will be recorded here when Adrenoline reaches the kext stage.

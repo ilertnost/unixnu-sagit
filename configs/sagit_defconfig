@@ -29,3 +29,9 @@ CONFIG_XNU_NATIVE_UFS=n
 CONFIG_XNU_NATIVE_RAM_BLOCK=n
 CONFIG_XNU_NATIVE_VIRTIO_BLOCK=n
 CONFIG_XNU_CRYPTO_BOOTSTRAP="source"
+
+# The arch/os fragments turn the qualified NativeAES prelink closure on for
+# sheng-class boards; this storage-less bring-up has no original AES closure,
+# and build-xnu-4k-baseline.sh refuses the combination. Keep it off, the way
+# the format-1 profile (device defconfig only) implicitly did.
+# CONFIG_XNU_NATIVE_AES is not set

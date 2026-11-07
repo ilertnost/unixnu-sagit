@@ -55,7 +55,11 @@ sequence, a device-tree property) and the code around it is ours.
 | `tools/build-xnu-sagit.sh` | cross-builds XNU for sagit |
 | `tools/startup-entries.py` | lists the kernel startup hook table in execution order, for reading the bring-up ladder |
 | `tools/licence-audit.py` | per-file SPDX audit of the tree and the pinned third-party sources |
-| `kernel/sagit` | device tree, defconfig, board description and the UniXNU source lock |
+| `board.toml`, `feeds.toml`, `unixnu.lock` | format-2 device profile, source pins, resolved refer commits |
+| `configs/sagit_defconfig`, `dts/sagit.dts` | kernel defconfig and board device tree |
+| `soc/msm8998/` | local, unpublished MSM8998 SoC profile |
+| `patches/xnu/series` | ordered device patch series (the boot ladder stays last) |
+| `porting.toml` | porting record: areas, statuses, evidence |
 | `docs` | boot chain ADRs, EDK2/ADT/payload/XNU notes, GPIO map |
 
 ## Requirements

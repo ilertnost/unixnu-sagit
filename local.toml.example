@@ -1,0 +1,11 @@
+# Copy to local.toml (ignored by Git) to point whole categories at local
+# directories or override sources. Command-line --local-module takes precedence.
+[local]
+# drivers = "~/Code/drivers"
+# kits = "~/Code/kits"
+
+# Example: override the local MSM8998 SoC profile with your own checkout.
+# [[source]]
+# kind = "soc"
+# name = "msm8998"
+# local = "../UniXNU-msm8998-common"

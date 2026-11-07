@@ -101,7 +101,7 @@ which is, in full:
 ```sh
 export TMPDIR=/data/opencode/tmp UNIXNU_TOOLCHAIN=/data/opencode/unixnu-toolchain
 cd /data/opencode/unixnu-src
-./unixnu defconfig sagit_defconfig -D ./kernel/sagit
+./unixnu defconfig sagit_defconfig -D .
 ./unixnu fetch
 ./unixnu build kernel
 ```

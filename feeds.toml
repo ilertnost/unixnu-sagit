@@ -1,0 +1,13 @@
+# Device source pins. The base feeds.toml of the UniXNU checkout supplies the
+# refer sources (xnu, libplatform, libdispatch, AvailabilityVersions, edk2,
+# libpthread, corecrypto-2023, IOStorageFamily); this file only adds what the
+# device itself needs.
+#
+# MSM8998 support is local and unpublished. Never invent a remote commit to
+# make a status report appear pinned: when a public UniXNU-msm8998-common
+# exists, replace `local` with `git` and its reviewed 40-character commit.
+
+[[source]]
+name = "msm8998"
+kind = "soc"
+local = "soc/msm8998"
