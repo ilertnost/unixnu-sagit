@@ -162,10 +162,10 @@ index 7187c15..9196539 100644
  	machine_startup(args);
  }
  
-index a688021..cd0a109 100644
+index a688021..f1033b3 100644
 --- a/osfmk/arm64/arm_vm_init.c
 +++ b/osfmk/arm64/arm_vm_init.c
-@@ -128,6 +128,236 @@ SECURITY_READ_ONLY_LATE(unsigned long) gPhysSize;
+@@ -128,6 +128,243 @@ SECURITY_READ_ONLY_LATE(unsigned long) gPhysSize;
  SECURITY_READ_ONLY_LATE(unsigned long) gT0Sz = T0SZ_BOOT;
  SECURITY_READ_ONLY_LATE(unsigned long) gT1Sz = T1SZ_BOOT;
  
@@ -228,6 +228,8 @@ index a688021..cd0a109 100644
 +static unsigned sagit_paint_next;
 +static void sagit_number(uint64_t, uint32_t, unsigned, int);
 +static void sagit_mark_phase(unsigned);
++static void sagit_map_fb(void);
++static uint64_t sagit_fb_kva;
 +static boolean_t sagit_kva_live;
 +static boolean_t sagit_pmap_live;
 +
@@ -342,13 +344,18 @@ index a688021..cd0a109 100644
 +	/*
 +	 * Pick the view of the framebuffer that is valid right now. Before the
 +	 * TTBR0 switch the V=P bootstrap map still covers it. After the switch
-+	 * only the kernel physmap works, and the physmap is exactly the window
-+	 * the loader handed over -- 256 MB from 0x44c04000 here, while SimpleFb
-+	 * lives at 0x9d400000, far outside it.
++	 * only the kernel tables do, and sagit_map_fb() has put an alias for it
++	 * in the tail of the physmap padding by then. Without that alias the
++	 * physmap (exactly the 256 MB window the loader handed over, while
++	 * SimpleFb lives at 0x9d400000) cannot see the framebuffer at all and
++	 * every checkpoint until initialize_screen() goes blind.
 +	 */
 +	if (!sagit_kva_live) {
 +		/* V=P bootstrap map, framebuffer at its physical address. */
 +		base = fb;
++	} else if (sagit_fb_kva) {
++		base = sagit_fb_kva;
++		color = SAGIT_COLOR_AFTER;
 +	} else if (gPhysSize != 0 && fb >= (uint64_t)gPhysBase &&
 +	    fb_end <= (uint64_t)gPhysBase + gPhysSize) {
 +		/* The kernel physmap covers all of RAM, framebuffer included. */
@@ -402,7 +409,90 @@ index a688021..cd0a109 100644
  /* 23543331 - step 1 of kext / kernel __TEXT and __DATA colocation is to move
   * all kexts before the kernel.  This is only for arm64 devices and looks
   * something like the following:
-@@ -1830,6 +2060,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -897,6 +1134,82 @@ arm_kva_to_tte(vm_offset_t va)
+ 	return tte2;
+ }
+ 
++/*
++ * Sagit: map the framebuffer where the ladder can always reach it.
++ *
++ * The loader hands over a 256 MB window (0x44c04000..0x54c04000 here) and the
++ * physmap is built from exactly that, while SimpleFb sits at 0x9d400000, a
++ * gigabyte above it. Before the TTBR0 switch the ladder paints straight at the
++ * physical address, because start.s gave the framebuffer block entries in the
++ * bootstrap map. After the switch that map is gone and the framebuffer has no
++ * translation at all, so every checkpoint between the switch and
++ * initialize_screen() would be invisible -- the blind window the ladder kept
++ * dying in.
++ *
++ * physmap_end reserves PTOV_TABLE_SIZE twigs of block alignment padding past
++ * the last translated byte and nothing ever allocates there: the kernel map
++ * starts at static_memory_end, and for this memory geometry that is exactly
++ * physmap_end. The tail of that padding therefore makes a stable home for the
++ * alias, independent of the random physmap slide and of the size of the boot
++ * window.
++ *
++ * Write-combining because that is what ml_io_map_unmappable() with
++ * VM_WIMG_WCOMB gives the framebuffer in initialize_screen(): two live
++ * mappings of one page must not disagree about cacheability.
++ */
++static void
++sagit_map_fb(void)
++{
++	uint64_t fb = sagit_ladder_fb;
++	uint64_t bytes, used, va;
++	unsigned i, blocks;
++
++	if ((fb == 0) || (sagit_ladder_bytes == 0) || ((fb & ARM_TT_L2_OFFMASK) != 0)) {
++		return;
++	}
++
++	bytes = (sagit_ladder_bytes + ARM_TT_L2_OFFMASK) & ~(uint64_t)ARM_TT_L2_OFFMASK;
++
++	/* End of what arm_vm_physmap_init() actually claimed, block aligned. */
++	used = 0;
++	for (i = 0; (i < PTOV_TABLE_SIZE) && (ptov_table[i].len != 0); i++) {
++		if (ptov_table[i].va + ptov_table[i].len > used) {
++			used = ptov_table[i].va + ptov_table[i].len;
++		}
++	}
++	used = (used + ARM_TT_L2_OFFMASK) & ~(uint64_t)ARM_TT_L2_OFFMASK;
++	if ((used + bytes) > (uint64_t)static_memory_end) {
++		return;
++	}
++	va = (uint64_t)static_memory_end - bytes;
++
++	blocks = (unsigned)(bytes >> ARM_TT_L2_SHIFT);
++	for (i = 0; i < blocks; i++) {
++		if (*arm_kva_to_tte((vm_offset_t)(va + ((uint64_t)i << ARM_TT_L2_SHIFT))) != ARM_TTE_EMPTY) {
++			return;
++		}
++	}
++	for (i = 0; i < blocks; i++) {
++		*arm_kva_to_tte((vm_offset_t)(va + ((uint64_t)i << ARM_TT_L2_SHIFT))) =
++		    (((fb + ((uint64_t)i << ARM_TT_L2_SHIFT)) & ARM_TTE_BLOCK_L2_MASK)
++		    | ARM_TTE_TYPE_BLOCK | ARM_TTE_VALID | ARM_TTE_BLOCK_AF | ARM_TTE_BLOCK_NX
++		    | ARM_TTE_BLOCK_AP(AP_RWNA) | ARM_TTE_BLOCK_SH(SH_OUTER_MEMORY)
++		    | ARM_TTE_BLOCK_ATTRINDX(CACHE_ATTRINDX_WRITECOMB));
++	}
++	__asm__ volatile("dsb ish" : : : "memory");
++
++	/* phystokv() must find the alias instead of panicking on the PA. */
++	for (i = 0; (i < PTOV_TABLE_SIZE) && (ptov_table[i].len != 0); i++) {
++	}
++	if (i < PTOV_TABLE_SIZE) {
++		ptov_table[i].pa = (pmap_paddr_t)fb;
++		ptov_table[i].va = (vm_map_address_t)va;
++		ptov_table[i].len = (vm_size_t)bytes;
++	}
++
++	sagit_fb_kva = va;
++}
++
+ #if XNU_MONITOR
+ 
+ static inline pt_entry_t *
+@@ -1830,6 +2143,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	vm_offset_t      ptpage_vaddr;
  	vm_map_address_t dynamic_memory_begin;
  
@@ -411,7 +501,7 @@ index a688021..cd0a109 100644
  	/*
  	 * Get the virtual and physical kernel-managed memory base from boot_args.
  	 */
-@@ -1897,6 +2129,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -1897,6 +2212,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  #endif // ARM_LARGE_MEMORY
  #endif
  
@@ -420,7 +510,7 @@ index a688021..cd0a109 100644
  #if KASAN && !defined(ARM_LARGE_MEMORY)
  	/* add the KASAN stolen memory to the physmap */
  	dynamic_memory_begin = static_memory_end + (shadow_ptop - shadow_pbase);
-@@ -1970,6 +2204,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -1970,6 +2287,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	real_avail_end = avail_end;
  #endif
  
@@ -429,7 +519,7 @@ index a688021..cd0a109 100644
  	/*
  	 * Initialize l1 and l2 page table pages :
  	 *   map physical memory at the kernel base virtual address
-@@ -1989,6 +2225,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -1989,6 +2308,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  #endif
  
  
@@ -438,7 +528,7 @@ index a688021..cd0a109 100644
  #if __ARM_KERNEL_PROTECT__
  	/* Expand the page tables to prepare for the EL0 mappings. */
  	arm_vm_expand_kernel_el0_mappings();
-@@ -2068,6 +2306,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -2068,6 +2389,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	}
  
  	(void) PE_parse_boot_argn("use_contiguous_hint", &use_contiguous_hint, sizeof(use_contiguous_hint));
@@ -447,7 +537,7 @@ index a688021..cd0a109 100644
  	assert(segSizePRELINKTEXT < 0x03000000); /* 23355738 */
  
  	/* if one of the new segments is present, the other one better be as well */
-@@ -2103,6 +2343,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -2103,6 +2426,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  
  	arm_vm_prot_init(args);
  
@@ -456,7 +546,7 @@ index a688021..cd0a109 100644
  	/*
  	 * Initialize the page tables for the low globals:
  	 *   cover this address range:
-@@ -2115,6 +2357,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -2115,6 +2440,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	*cpu_l2_tte = (kvtophys(ptpage_vaddr) & ARM_TTE_TABLE_MASK) | ARM_TTE_TYPE_TABLE | ARM_TTE_VALID | ARM_TTE_TABLE_PXN | ARM_TTE_TABLE_XN;
  	bzero((void *)ptpage_vaddr, ARM_PGBYTES);
  
@@ -465,7 +555,7 @@ index a688021..cd0a109 100644
  	/*
  	 * Initialize l2 page table pages :
  	 *   cover this address range:
-@@ -2134,6 +2378,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -2134,6 +2461,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	init_ptpages(cpu_tte, dynamic_memory_begin, VM_MAX_KERNEL_ADDRESS, TRUE, ARM_DYNAMIC_TABLE_XN | ARM_TTE_TABLE_AP(ARM_TTE_TABLE_AP_USER_NA));
  #endif
  
@@ -474,7 +564,7 @@ index a688021..cd0a109 100644
  #if KASAN
  	/* record the extent of the physmap */
  	physmap_vbase = physmap_base;
-@@ -2145,10 +2391,15 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -2145,10 +2474,16 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	mt_early_init();
  #endif /* CONFIG_CPU_COUNTERS */
  
@@ -484,13 +574,14 @@ index a688021..cd0a109 100644
 +	sagit_mark_phase(1);
  
  	arm_vm_physmap_init(args);
++	sagit_map_fb();
 +	sagit_mark_phase(2);
  	set_mmu_ttb_alternate(cpu_ttep & TTBR_BADDR_MASK);
 +	sagit_mark_phase(3);
  
  #if XNU_MONITOR
  	ml_enable_monitor();
-@@ -2162,6 +2413,9 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -2162,6 +2497,9 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	cpu_tte = (tt_entry_t*)(phystokv(cpu_ttep));
  	invalid_tte = (tt_entry_t*)(phystokv(invalid_ttep));
  
@@ -500,7 +591,7 @@ index a688021..cd0a109 100644
  	// From here on out, we're off the bootstrap translation tables.
  
  
-@@ -2255,6 +2509,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -2255,6 +2593,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  #endif
  	pmap_bootstrap(dynamic_memory_begin);
  
@@ -509,7 +600,7 @@ index a688021..cd0a109 100644
  	disable_preemption();
  
  	/*
-@@ -2378,6 +2634,7 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -2378,6 +2718,7 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	pmap_static_allocations_done();
  #endif
  	first_avail = avail_start;
@@ -517,7 +608,7 @@ index a688021..cd0a109 100644
  	patch_low_glo_static_region(args->topOfKernelData, avail_start - args->topOfKernelData);
  	enable_preemption();
  }
-@@ -2399,3 +2656,112 @@ kernel_text_contains(vm_offset_t addr)
+@@ -2399,3 +2740,112 @@ kernel_text_contains(vm_offset_t addr)
  	}
  	return segDATACONSTB <= addr && addr < (segDATACONSTB + segSizeDATACONST);
  }
