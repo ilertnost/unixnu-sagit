@@ -12,14 +12,26 @@ It does **not** contain the graphics stack. The GPU runtime for Adreno a5xx
 <https://github.com/ilertnost/Adrenoline>. The payload menu entry is still
 called *Adrenoline* because that is the system being booted.
 
-## Clean-room policy
+## Provenance and licences
 
-This project is **not a fork** of <https://github.com/MC-XiaoXiao/ios_sagit>
-and shares no code with it. That repository and other ports are read only to
-understand how the hardware and Apple's boot chain are wired together; every
-implementation here is written from scratch against the hardware and the
-upstream sources (edk2-msm8998, UniXNU, XNU, Linux DTS). No vendor blobs,
-proprietary headers or copied source are committed.
+This project is **not a fork** of <https://github.com/MC-XiaoXiao/ios_sagit>,
+and what may be reused from it or from any other port is decided per file, by
+the licence that file declares, not by the repository as a whole. Every
+implementation written here is ours; the review that decides what may be
+carried over is `docs/THIRD-PARTY.md`.
+
+| category | what we do |
+|---|---|
+| permissive (`BSD-2-Clause`, `BSD-2-Clause-Patent`, `BSD-3-Clause`, `MIT`, `ISC`, `Apache-2.0`) | may be vendored into `third_party/` with its copyright header and SPDX line intact; the upstream commit and the sha256 of every file are recorded |
+| `GPL-2.0-or-later`, `LGPL-2.1-or-later`, `MPL-2.0` | may be combined with this project, subject to their terms |
+| `GPL-2.0-only`, `APSL-2.0` | never copied, never paraphrased. Only the facts are used |
+| no licence line | not vendored until checked by hand |
+
+Rewriting a file "so that none of the original code remains" is not an
+exception to the third row: a paraphrase that keeps the structure and the
+sequences is still a derivative work. `tools/licence-audit.py` applies the
+rule mechanically, and `docs/THIRD-PARTY.md` records the audit of every tree
+we read.
 
 If a fact comes from another port, it is written down as a fact (an address, a
 sequence, a device-tree property) and the code around it is ours.
