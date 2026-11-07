@@ -252,7 +252,10 @@ would read as a hang.
 | 27 | low globals mapped |
 | 28 | dynamic range mapped |
 | 29 | cpu counters, before the physmap |
-| 30 | TTBR0 replaced, KVA live (first cyan bar) |
+| 91 | phase: `arm_set_user_tbi()` returned |
+| 92 | phase: `arm_vm_physmap_init()` returned |
+| 93 | phase: `set_mmu_ttb_alternate()` returned, TTBR0 switch next |
+| 30 | TTBR0 replaced, KVA live (first cyan bar, painted at 40 on this board) |
 | 31 | `pmap_bootstrap()` |
 | 32 | `arm_vm_init()` done |
 | 33 | `arm_init()` after `arm_vm_init()` |
@@ -312,16 +315,40 @@ video base=0x9d400000 display=1 row=4320 width=1080 height=1920 depth=32
 ```
 
 The framebuffer is outside the 256 MB window (the window is
-`0x44C04000..0x54C04000`), so the painter has three paths. With the MMU off it
-is the physical address itself. After the MMU comes on, `start.s` adds L2 block
-entries for it to the V=P bootstrap map, which is why the assembler checkpoints
-can keep using the physical address. Once `arm_vm_init()` replaces TTBR0 with
-the kernel pmap, that map is gone, but the kernel physmap covers all of RAM --
-the framebuffer included -- so `phystokv()` of the physical address works and is
-what the C half uses (`sagit_kva_live` marks the switch, not `gVirtBase`, which
-is set long before the tables actually change). `ml_io_map_unmappable()` is only
-the fallback for a framebuffer outside reported memory. Bars are cleaned to DRAM
-because the display controller scans memory directly.
+`0x44C04000..0x54C04000`), so the painter has three views of it. With the MMU
+off it is the physical address itself. After the MMU comes on, `start.s` adds
+L2 block entries for it to the V=P bootstrap map, which is why the assembler
+checkpoints and everything up to checkpoint 29 can keep using the physical
+address.
+
+Once `arm_vm_init()` replaces TTBR0 with the kernel pmap, that map is gone, and
+the physmap does **not** cover the framebuffer. DarwinBoot reports
+`MemorySize = WindowSize`, the one contiguous conventional-memory run it
+allocated for the kernel, and XNU builds `physmap_base .. physmap_base + memSize`
+from exactly that: 256 MB here, ending at `0x54C04000`. `phystokv(0x9d400000)`
+is then outside `physmap_end` and faults. `ml_io_map_unmappable()` is the right
+answer for a framebuffer outside reported memory, but it needs `pmap_bootstrap()`
+and the kernel map; called at checkpoint 30 it reaches into a kernel map that
+does not exist yet and the board resets. That was the stop at 29: the bar and
+the number were planted before the switch, and the next paint killed the boot.
+
+The ladder therefore has a blind window between the TTBR0 switch and the point
+where the kernel can map memory for itself. Inside it `sagit_step()` records the
+checkpoint index and paints nothing; the bar index and the frame counter stay in
+step, and the first checkpoint that can see the framebuffer again (the screen
+acquisition, right after `initialize_screen()`) paints the whole gap in cyan and
+the current number. So checkpoint 30 and 31 can appear together, and a photo
+reads as: 29 means the boot stopped before the switch, 91/92/93 name the last
+phase that completed inside the gap, and 31 or more means both the switch and
+`pmap_bootstrap()` were fine.
+
+The phases are painted as 91, 92 and 93 so they cannot be mistaken for
+checkpoints; they do not advance the bar index, and the counter clamps at 99.
+Widening the window so the framebuffer *is* in the physmap is a separate
+decision: the window has to be one contiguous conventional-memory run, and it
+has to start below `0x9d400000`, because a window that begins above the
+framebuffer is just as unreachable through `phystokv()`. Bars are cleaned to
+DRAM because the display controller scans memory directly.
 
 The framebuffer and the window are in *different* 1 GB regions (L1 index 2 vs
 1 on 4 KB granule with `T0SZ_BOOT` 26), so the framebuffer's L1 slot is empty

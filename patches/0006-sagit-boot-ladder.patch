@@ -1,6 +1,7 @@
+index 7187c15..9196539 100644
 --- a/osfmk/arm/arm_init.c
 +++ b/osfmk/arm/arm_init.c
-@@ -104,6 +104,9 @@
+@@ -104,6 +104,9 @@ extern const char version[];
  extern const char version_variant[];
  extern int      disableConsoleOutput;
  
@@ -10,7 +11,7 @@
  int             pc_trace_buf[PC_TRACE_BUF_SIZE] = {0};
  int             pc_trace_cnt = PC_TRACE_BUF_SIZE;
  int             debug_task;
-@@ -354,6 +357,8 @@
+@@ -354,6 +357,8 @@ arm_init(
  	DTEntry chosen = NULL;
  	unsigned int dt_entry_size = 0;
  
@@ -19,7 +20,7 @@
  	arm_setup_pre_sign();
  
  	arm_slide_rebase_and_sign_image();
-@@ -362,6 +367,8 @@
+@@ -362,6 +367,8 @@ arm_init(
  	const_boot_args = *args;
  	BootArgs = args = &const_boot_args;
  
@@ -28,7 +29,7 @@
  	cpu_data_init(&BootCpuData);
  #if defined(HAS_APPLE_PAC)
  	/* bootstrap cpu process dependent key for kernel has been loaded by start.s */
-@@ -372,6 +379,8 @@
+@@ -372,6 +379,8 @@ arm_init(
  	PE_init_platform(FALSE, args); /* Get platform expert set up */
  	boot_progress_init();
  
@@ -37,7 +38,7 @@
  #if __arm64__
  	configure_timer_apple_regs();
  	wfe_timeout_configure();
-@@ -380,6 +389,8 @@
+@@ -380,6 +389,8 @@ arm_init(
  	configure_misc_apple_boot_args();
  	configure_misc_apple_regs(true);
  
@@ -46,7 +47,7 @@
  #if (DEVELOPMENT || DEBUG)
  	unsigned long const *platform_stall_ptr = NULL;
  
-@@ -441,10 +452,14 @@
+@@ -441,10 +452,14 @@ arm_init(
  	}
  #endif
  
@@ -61,7 +62,7 @@
  	assert(master_cpu >= 0 && master_cpu <= ml_get_max_cpu_number());
  
  	BootCpuData.cpu_number = (unsigned short)master_cpu;
-@@ -458,6 +473,8 @@
+@@ -458,6 +473,8 @@ arm_init(
  	    + ((uintptr_t)&BootCpuData
  	    - (uintptr_t)(args->virtBase)));
  
@@ -70,7 +71,7 @@
  	thread = thread_bootstrap();
  	thread->machine.CpuDatap = &BootCpuData;
  	thread->machine.pcpu_data_base = (vm_offset_t)0;
-@@ -470,22 +487,37 @@
+@@ -470,22 +487,37 @@ arm_init(
  	 * preemption level is not really meaningful for the bootstrap thread.
  	 */
  	thread->machine.preemption_count = 0;
@@ -108,7 +109,7 @@
  	if (PE_parse_boot_argn("maxmem", &maxmem, sizeof(maxmem))) {
  		xmaxmem = (uint64_t) maxmem * (1024 * 1024);
  	} else if (PE_get_default("hw.memsize", &memsize, sizeof(memsize))) {
-@@ -531,6 +563,7 @@
+@@ -531,6 +563,7 @@ arm_init(
  	__builtin_arm_wsr("pan", 1);
  #endif  /* __ARM_PAN_AVAILABLE__ */
  
@@ -116,7 +117,7 @@
  	boot_progress_stage("arm_vm_init enter");
  	arm_vm_init(xmaxmem, args);
  	boot_progress_stage("arm_vm_init returned");
-@@ -539,16 +572,25 @@
+@@ -539,16 +572,25 @@ arm_init(
  		patch_low_glo();
  	}
  
@@ -142,7 +143,7 @@
  
  	serialmode = 0;
  	if (PE_parse_boot_argn("serial", &serialmode, sizeof(serialmode))) {
-@@ -590,6 +632,8 @@
+@@ -590,6 +632,8 @@ arm_init(
  	}
  	PE_create_console();
  
@@ -151,7 +152,7 @@
  	/* setup console output */
  	PE_init_printf(FALSE);
  
-@@ -667,6 +711,9 @@
+@@ -667,6 +711,9 @@ arm_init(
  	 * against string vulnerabilities
  	 */
  	__stack_chk_guard &= ~(0xFFULL << 8);
@@ -161,9 +162,10 @@
  	machine_startup(args);
  }
  
+index a688021..cd0a109 100644
 --- a/osfmk/arm64/arm_vm_init.c
 +++ b/osfmk/arm64/arm_vm_init.c
-@@ -128,6 +128,214 @@
+@@ -128,6 +128,236 @@ SECURITY_READ_ONLY_LATE(unsigned long) gPhysSize;
  SECURITY_READ_ONLY_LATE(unsigned long) gT0Sz = T0SZ_BOOT;
  SECURITY_READ_ONLY_LATE(unsigned long) gT1Sz = T1SZ_BOOT;
  
@@ -223,8 +225,11 @@
 +static uint64_t sagit_ladder_bytes;
 +static uint64_t sagit_ladder_map;
 +static unsigned sagit_bar_next;
++static unsigned sagit_paint_next;
 +static void sagit_number(uint64_t, uint32_t, unsigned, int);
++static void sagit_mark_phase(unsigned);
 +static boolean_t sagit_kva_live;
++static boolean_t sagit_pmap_live;
 +
 +static void
 +sagit_clean(uint64_t vaddr, uint64_t bytes)
@@ -326,10 +331,48 @@
 +	uint64_t fb_end = fb + sagit_ladder_bytes;
 +	uint64_t base;
 +	unsigned index = sagit_bar_next;
++	unsigned bar;
 +	uint32_t color = SAGIT_COLOR_BEFORE;
 +	boolean_t overflow = FALSE;
 +
 +	if (!fb || !sagit_ladder_row) {
++		return;
++	}
++
++	/*
++	 * Pick the view of the framebuffer that is valid right now. Before the
++	 * TTBR0 switch the V=P bootstrap map still covers it. After the switch
++	 * only the kernel physmap works, and the physmap is exactly the window
++	 * the loader handed over -- 256 MB from 0x44c04000 here, while SimpleFb
++	 * lives at 0x9d400000, far outside it.
++	 */
++	if (!sagit_kva_live) {
++		/* V=P bootstrap map, framebuffer at its physical address. */
++		base = fb;
++	} else if (gPhysSize != 0 && fb >= (uint64_t)gPhysBase &&
++	    fb_end <= (uint64_t)gPhysBase + gPhysSize) {
++		/* The kernel physmap covers all of RAM, framebuffer included. */
++		base = (uint64_t)phystokv((vm_offset_t)fb);
++		color = SAGIT_COLOR_AFTER;
++	} else if (sagit_pmap_live) {
++		if (!sagit_ladder_map) {
++			sagit_ladder_map = ml_io_map_unmappable((vm_offset_t)fb,
++			    (vm_size_t)sagit_ladder_bytes, VM_WIMG_WCOMB);
++		}
++		if (!sagit_ladder_map) {
++			return;
++		}
++		base = sagit_ladder_map;
++		color = SAGIT_COLOR_AFTER;
++	} else {
++		/*
++		 * The blind window. ml_io_map_unmappable() needs pmap_bootstrap()
++		 * and the kernel map, neither of which exists yet, and calling it
++		 * here is a silent crash -- the reset this ladder kept hitting at
++		 * the TTBR0 switch. Record the step instead and let the first
++		 * checkpoint that can see the framebuffer paint the whole gap.
++		 */
++		sagit_bar_next = index + 1;
 +		return;
 +	}
 +
@@ -343,34 +386,15 @@
 +		color = SAGIT_COLOR_OVER;
 +	}
 +
-+	if (!sagit_kva_live) {
-+		/* V=P bootstrap map, framebuffer at its physical address. */
-+		base = fb;
-+	} else if (gPhysSize != 0 && fb >= (uint64_t)gPhysBase &&
-+	    fb_end <= (uint64_t)gPhysBase + gPhysSize) {
-+		/* The kernel physmap covers all of RAM, framebuffer included. */
-+		base = (uint64_t)phystokv((vm_offset_t)fb);
-+		if (!overflow) {
-+			color = SAGIT_COLOR_AFTER;
-+		}
-+	} else {
-+		if (!sagit_ladder_map) {
-+			sagit_ladder_map = ml_io_map_unmappable((vm_offset_t)fb,
-+			    (vm_size_t)sagit_ladder_bytes, VM_WIMG_WCOMB);
-+		}
-+		if (!sagit_ladder_map) {
-+			return;
-+		}
-+		base = sagit_ladder_map;
-+		if (!overflow) {
-+			color = SAGIT_COLOR_AFTER;
-+		}
++	for (bar = sagit_paint_next; bar <= index; bar++) {
++		sagit_bar_paint(base, sagit_ladder_row, bar, color);
 +	}
-+
-+	sagit_bar_paint(base, sagit_ladder_row, index, color);
++	sagit_paint_next = index + 1;
 +	sagit_number(base, sagit_ladder_row, index, 0);
 +	sagit_number(base, sagit_ladder_row, index, 1);
-+	if (!overflow) {
++	if (overflow) {
++		sagit_paint_next = index;
++	} else {
 +		sagit_bar_next = index + 1;
 +	}
 +}
@@ -378,7 +402,7 @@
  /* 23543331 - step 1 of kext / kernel __TEXT and __DATA colocation is to move
   * all kexts before the kernel.  This is only for arm64 devices and looks
   * something like the following:
-@@ -1830,6 +2038,8 @@
+@@ -1830,6 +2060,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	vm_offset_t      ptpage_vaddr;
  	vm_map_address_t dynamic_memory_begin;
  
@@ -387,7 +411,7 @@
  	/*
  	 * Get the virtual and physical kernel-managed memory base from boot_args.
  	 */
-@@ -1897,6 +2107,8 @@
+@@ -1897,6 +2129,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  #endif // ARM_LARGE_MEMORY
  #endif
  
@@ -396,7 +420,7 @@
  #if KASAN && !defined(ARM_LARGE_MEMORY)
  	/* add the KASAN stolen memory to the physmap */
  	dynamic_memory_begin = static_memory_end + (shadow_ptop - shadow_pbase);
-@@ -1970,6 +2182,8 @@
+@@ -1970,6 +2204,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	real_avail_end = avail_end;
  #endif
  
@@ -405,7 +429,7 @@
  	/*
  	 * Initialize l1 and l2 page table pages :
  	 *   map physical memory at the kernel base virtual address
-@@ -1989,6 +2203,8 @@
+@@ -1989,6 +2225,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  #endif
  
  
@@ -414,7 +438,7 @@
  #if __ARM_KERNEL_PROTECT__
  	/* Expand the page tables to prepare for the EL0 mappings. */
  	arm_vm_expand_kernel_el0_mappings();
-@@ -2068,6 +2284,8 @@
+@@ -2068,6 +2306,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	}
  
  	(void) PE_parse_boot_argn("use_contiguous_hint", &use_contiguous_hint, sizeof(use_contiguous_hint));
@@ -423,7 +447,7 @@
  	assert(segSizePRELINKTEXT < 0x03000000); /* 23355738 */
  
  	/* if one of the new segments is present, the other one better be as well */
-@@ -2103,6 +2321,8 @@
+@@ -2103,6 +2343,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  
  	arm_vm_prot_init(args);
  
@@ -432,7 +456,7 @@
  	/*
  	 * Initialize the page tables for the low globals:
  	 *   cover this address range:
-@@ -2115,6 +2335,8 @@
+@@ -2115,6 +2357,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	*cpu_l2_tte = (kvtophys(ptpage_vaddr) & ARM_TTE_TABLE_MASK) | ARM_TTE_TYPE_TABLE | ARM_TTE_VALID | ARM_TTE_TABLE_PXN | ARM_TTE_TABLE_XN;
  	bzero((void *)ptpage_vaddr, ARM_PGBYTES);
  
@@ -441,7 +465,7 @@
  	/*
  	 * Initialize l2 page table pages :
  	 *   cover this address range:
-@@ -2134,6 +2356,8 @@
+@@ -2134,6 +2378,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	init_ptpages(cpu_tte, dynamic_memory_begin, VM_MAX_KERNEL_ADDRESS, TRUE, ARM_DYNAMIC_TABLE_XN | ARM_TTE_TABLE_AP(ARM_TTE_TABLE_AP_USER_NA));
  #endif
  
@@ -450,16 +474,23 @@
  #if KASAN
  	/* record the extent of the physmap */
  	physmap_vbase = physmap_base;
-@@ -2145,6 +2369,8 @@
+@@ -2145,10 +2391,15 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	mt_early_init();
  #endif /* CONFIG_CPU_COUNTERS */
  
 +	sagit_step();		/* vm_init: cpu counters, before physmap */
 +
  	arm_set_user_tbi();
++	sagit_mark_phase(1);
  
  	arm_vm_physmap_init(args);
-@@ -2162,6 +2388,9 @@
++	sagit_mark_phase(2);
+ 	set_mmu_ttb_alternate(cpu_ttep & TTBR_BADDR_MASK);
++	sagit_mark_phase(3);
+ 
+ #if XNU_MONITOR
+ 	ml_enable_monitor();
+@@ -2162,6 +2413,9 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	cpu_tte = (tt_entry_t*)(phystokv(cpu_ttep));
  	invalid_tte = (tt_entry_t*)(phystokv(invalid_ttep));
  
@@ -469,7 +500,7 @@
  	// From here on out, we're off the bootstrap translation tables.
  
  
-@@ -2255,6 +2484,8 @@
+@@ -2255,6 +2509,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  #endif
  	pmap_bootstrap(dynamic_memory_begin);
  
@@ -478,7 +509,7 @@
  	disable_preemption();
  
  	/*
-@@ -2378,6 +2609,7 @@
+@@ -2378,6 +2634,7 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	pmap_static_allocations_done();
  #endif
  	first_avail = avail_start;
@@ -486,9 +517,123 @@
  	patch_low_glo_static_region(args->topOfKernelData, avail_start - args->topOfKernelData);
  	enable_preemption();
  }
+@@ -2399,3 +2656,112 @@ kernel_text_contains(vm_offset_t addr)
+ 	}
+ 	return segDATACONSTB <= addr && addr < (segDATACONSTB + segSizeDATACONST);
+ }
++/*
++ * Decimal readout of the checkpoint, painted in two corners.
++ *
++ * Measuring the bars works until the boot menu is redrawn over the
++ * framebuffer on the next boot: its boxes cover the middle of the second
++ * column, which is exactly where the interesting checkpoints land.  A number
++ * in a corner is read from the photograph instead of a stack being counted.
++ */
++#define SAGIT_COUNT_X       820
++#define SAGIT_COUNT_Y       120
++#define SAGIT_COUNT_MARGIN  90
++
++static const uint8_t sagit_digit_row[10][5] = {
++	{ 7, 5, 5, 5, 7 }, { 2, 6, 2, 2, 7 }, { 7, 1, 7, 4, 7 },
++	{ 7, 1, 7, 1, 7 }, { 5, 5, 7, 1, 1 }, { 7, 4, 7, 1, 7 },
++	{ 7, 4, 7, 5, 7 }, { 7, 1, 1, 1, 1 }, { 7, 5, 7, 5, 7 },
++	{ 7, 5, 7, 1, 7 },
++};
++
++static void
++sagit_fill(uint64_t base, uint32_t row_bytes, uint64_t x, uint64_t y,
++    uint64_t width, uint64_t height, uint32_t colour)
++{
++	uint64_t row, column;
++
++	for (row = 0; row < height; row++) {
++		uint64_t line = base + (y + row) * row_bytes + x * 4;
++
++		for (column = 0; column < width; column++) {
++			*(volatile uint32_t *)(uintptr_t)(line + column * 4) =
++			    colour;
++		}
++		sagit_clean(line, width * 4);
++	}
++	__asm__ volatile("dsb sy" : : : "memory");
++}
++
++static void
++sagit_number(uint64_t base, uint32_t row_bytes, unsigned value, int low)
++{
++	const uint64_t scale = 8;
++	const uint64_t gap = 8;
++	uint64_t width = (3 * scale) * 2 + gap;
++	uint64_t height = 5 * scale;
++	uint64_t x = SAGIT_COUNT_X;
++	uint64_t y = SAGIT_COUNT_Y;
++	unsigned digits[2];
++	unsigned index, row, column;
++
++	if (low) {
++		uint64_t rows = sagit_ladder_row ? sagit_ladder_bytes /
++		    sagit_ladder_row : 0;
++
++		if (rows < height + SAGIT_COUNT_MARGIN) {
++			return;
++		}
++		y = rows - height - SAGIT_COUNT_MARGIN;
++	}
++	if (value > 99) {
++		value = 99;
++	}
++	digits[0] = value / 10;
++	digits[1] = value % 10;
++
++	sagit_fill(base, row_bytes, x, y, width, height, 0);
++	for (index = 0; index < 2; index++) {
++		uint64_t dx = x + index * (3 * scale + gap);
++
++		for (row = 0; row < 5; row++) {
++			for (column = 0; column < 3; column++) {
++				if (sagit_digit_row[digits[index]][row] &
++				    (4u >> column)) {
++					sagit_fill(base, row_bytes,
++					    dx + column * scale,
++					    y + row * scale, scale, scale,
++					    0xFFFFFFFF);
++				}
++			}
++		}
++	}
++}
++
++/*
++ * A marker inside one checkpoint, painted as 91, 92, 93 so it cannot be
++ * mistaken for a checkpoint number. Every caller sits between checkpoint 29
++ * and the TTBR0 switch, so the V=P map is still the way in.
++ */
++static void
++sagit_mark_phase(unsigned phase)
++{
++	uint64_t fb = sagit_ladder_fb;
++
++	if (!fb || !sagit_ladder_row || sagit_kva_live) {
++		return;
++	}
++	sagit_number(fb, sagit_ladder_row, 90 + phase, 0);
++	sagit_number(fb, sagit_ladder_row, 90 + phase, 1);
++}
++
++/*
++ * Called once the kernel can map memory for itself (after pmap_bootstrap and
++ * after the kernel map exists). Until then the framebuffer is out of reach,
++ * because the loader's window does not cover it.
++ */
++void
++sagit_pmap_ready(void)
++{
++	sagit_pmap_live = TRUE;
++}
+index 2056712..3ff44eb 100644
 --- a/osfmk/arm64/machine_routines.c
 +++ b/osfmk/arm64/machine_routines.c
-@@ -994,6 +994,9 @@
+@@ -994,6 +994,9 @@ ml_read_chip_revision(unsigned int *rev __unused)
  #endif
  }
  
@@ -498,7 +643,7 @@
  void
  ml_parse_cpu_topology(void)
  {
-@@ -1008,6 +1011,8 @@
+@@ -1008,6 +1011,8 @@ ml_parse_cpu_topology(void)
  	const boolean_t cpus_boot_arg_present = PE_parse_boot_argn("cpus", &cpu_boot_arg, sizeof(cpu_boot_arg));
  	const boolean_t cpumask_boot_arg_present = PE_parse_boot_argn("cpumask", &cpumask_boot_arg, sizeof(cpumask_boot_arg));
  
@@ -507,7 +652,7 @@
  	// The cpus=N and cpumask=N boot args cannot be used simultaneously. Flag this
  	// so that we trigger a panic later in the boot process, once serial is enabled.
  	if (cpus_boot_arg_present && cpumask_boot_arg_present) {
-@@ -1020,6 +1025,8 @@
+@@ -1020,6 +1025,8 @@ ml_parse_cpu_topology(void)
  	err = SecureDTInitEntryIterator(entry, &iter);
  	assert(err == kSuccess);
  
@@ -516,7 +661,7 @@
  	for (int i = 0; i <= MAX_CPU_CLUSTER_PHY_ID; i++) {
  		cluster_offsets[i] = -1;
  		cluster_phys_to_logical[i] = -1;
-@@ -1137,6 +1144,10 @@
+@@ -1137,6 +1144,10 @@ ml_parse_cpu_topology(void)
  		cluster->num_cpus++;
  		cluster->cpu_mask |= 1ULL << cpu->cpu_id;
  
@@ -527,7 +672,7 @@
  		if (is_boot_cpu) {
  			assert(topology_info.boot_cpu == NULL);
  			topology_info.boot_cpu = cpu;
-@@ -1148,6 +1159,8 @@
+@@ -1148,6 +1159,8 @@ ml_parse_cpu_topology(void)
  #endif
  	}
  
@@ -536,7 +681,7 @@
  #if HAS_CLUSTER
  	/*
  	 * Build the cluster offset array, ensuring that the region reserved
-@@ -1174,6 +1187,8 @@
+@@ -1174,6 +1187,8 @@ ml_parse_cpu_topology(void)
  	assert(topology_info.boot_cpu != NULL);
  	ml_read_chip_revision(&topology_info.chip_revision);
  
@@ -545,7 +690,7 @@
  	/*
  	 * Set TPIDR_EL0 to indicate the correct cpu number & cluster id,
  	 * as we may not be booting from cpu 0. Userspace will consume
-@@ -1189,6 +1204,8 @@
+@@ -1189,6 +1204,8 @@ ml_parse_cpu_topology(void)
  	__builtin_arm_wsr64("TPIDR_EL0", tpidr_el0);
  
  	__builtin_arm_wsr64("TPIDRRO_EL0", 0);
@@ -554,12 +699,14 @@
  }
  
  const ml_topology_info_t *
+index bca4c7c..edc80da 100644
 --- a/osfmk/arm64/start.s
 +++ b/osfmk/arm64/start.s
-@@ -456,6 +456,99 @@
+@@ -455,6 +455,99 @@ start_cpu:
+ 2:
  .endmacro
  
- /*
++/*
 + * Sagit bring-up ladder, assembler half.
 + *
 + * XNU acquires the screen only late in kernel_bootstrap(), so a fault anywhere
@@ -652,11 +799,10 @@
 +9:
 +.endmacro
 +
-+/*
+ /*
   * _start_first_cpu
   * Cold boot init routine.  Called from __start
-  *   x0 - Boot args
-@@ -513,6 +606,11 @@
+@@ -513,6 +606,11 @@ LEXT(start_first_cpu)
  	msr		SPSel, #0							// Set SP_EL0 to interrupt stack
  	mov		sp, x0
  
@@ -668,7 +814,7 @@
  	// Load address to the C init routine into link register
  	adrp	lr, EXT(arm_init)@page
  	add		lr, lr, EXT(arm_init)@pageoff
-@@ -626,6 +724,79 @@
+@@ -626,6 +724,79 @@ Lbootstrap_tables_ready:
  	/* Ensure TTEs are visible */
  	dsb		ish
  
@@ -748,7 +894,7 @@
  
  	b		common_start
  
-@@ -761,11 +932,38 @@
+@@ -761,11 +932,38 @@ common_start:
  	PAC_INIT_KEY_STATE tmp=x0, tmp2=x1
  #endif /* HAS_APPLE_PAC */
  
@@ -787,7 +933,7 @@
  #if !VMAPPLE
  	MOV64   x1, SCTLR_EL1_DEFAULT
  	cmp		x0, x1
-@@ -810,6 +1008,19 @@
+@@ -810,6 +1008,19 @@ common_start:
  	msr		CPU_OVRD, x9
  #endif
  
@@ -807,119 +953,27 @@
  	// If x21 != 0, we're doing a warm reset, so we need to trampoline to the kernel pmap.
  	cbnz	x21, Ltrampoline
  
+index 8a82186..ed53543 100644
 --- a/osfmk/kern/startup.c
 +++ b/osfmk/kern/startup.c
-@@ -136,6 +136,9 @@
+@@ -136,6 +136,10 @@
  extern void mbuf_tag_init(void);
  #endif
  
 +/* Bring-up ladder checkpoint, painted into the framebuffer from arm_vm_init.c. */
 +extern void sagit_step(void);
++extern void sagit_pmap_ready(void);
 +
  #if CONFIG_XNUPOST
  #include <tests/ktest.h>
  #include <tests/xnupost.h>
-@@ -719,6 +722,8 @@
+@@ -719,6 +723,9 @@ kernel_bootstrap_thread(void)
  	 */
  	initialize_screen(NULL, kPEAcquireScreen);
  
++	sagit_pmap_ready();
 +	sagit_step();		/* startup: screen acquired */
 +
  	/*
  	 *	Initialize the shared region module.
  	 */
---- a/osfmk/arm64/arm_vm_init.c
-+++ b/osfmk/arm64/arm_vm_init.c
-@@ -2391,11 +2623,92 @@
- bool
- kernel_text_contains(vm_offset_t addr)
- {
- 	if (segTEXTB <= addr && addr < (segTEXTB + segSizeTEXT)) {
- 		return true;
- 	}
- 	if (segTEXTEXECB <= addr && addr < (segTEXTEXECB + segSizeTEXTEXEC)) {
- 		return true;
- 	}
- 	return segDATACONSTB <= addr && addr < (segDATACONSTB + segSizeDATACONST);
- }
-+/*
-+ * Decimal readout of the checkpoint, painted in two corners.
-+ *
-+ * Measuring the bars works until the boot menu is redrawn over the
-+ * framebuffer on the next boot: its boxes cover the middle of the second
-+ * column, which is exactly where the interesting checkpoints land.  A number
-+ * in a corner is read from the photograph instead of a stack being counted.
-+ */
-+#define SAGIT_COUNT_X       820
-+#define SAGIT_COUNT_Y       120
-+#define SAGIT_COUNT_MARGIN  90
-+
-+static const uint8_t sagit_digit_row[10][5] = {
-+	{ 7, 5, 5, 5, 7 }, { 2, 6, 2, 2, 7 }, { 7, 1, 7, 4, 7 },
-+	{ 7, 1, 7, 1, 7 }, { 5, 5, 7, 1, 1 }, { 7, 4, 7, 1, 7 },
-+	{ 7, 4, 7, 5, 7 }, { 7, 1, 1, 1, 1 }, { 7, 5, 7, 5, 7 },
-+	{ 7, 5, 7, 1, 7 },
-+};
-+
-+static void
-+sagit_fill(uint64_t base, uint32_t row_bytes, uint64_t x, uint64_t y,
-+    uint64_t width, uint64_t height, uint32_t colour)
-+{
-+	uint64_t row, column;
-+
-+	for (row = 0; row < height; row++) {
-+		uint64_t line = base + (y + row) * row_bytes + x * 4;
-+
-+		for (column = 0; column < width; column++) {
-+			*(volatile uint32_t *)(uintptr_t)(line + column * 4) =
-+			    colour;
-+		}
-+		sagit_clean(line, width * 4);
-+	}
-+	__asm__ volatile("dsb sy" : : : "memory");
-+}
-+
-+static void
-+sagit_number(uint64_t base, uint32_t row_bytes, unsigned value, int low)
-+{
-+	const uint64_t scale = 8;
-+	const uint64_t gap = 8;
-+	uint64_t width = (3 * scale) * 2 + gap;
-+	uint64_t height = 5 * scale;
-+	uint64_t x = SAGIT_COUNT_X;
-+	uint64_t y = SAGIT_COUNT_Y;
-+	unsigned digits[2];
-+	unsigned index, row, column;
-+
-+	if (low) {
-+		uint64_t rows = sagit_ladder_row ? sagit_ladder_bytes /
-+		    sagit_ladder_row : 0;
-+
-+		if (rows < height + SAGIT_COUNT_MARGIN) {
-+			return;
-+		}
-+		y = rows - height - SAGIT_COUNT_MARGIN;
-+	}
-+	if (value > 99) {
-+		value = 99;
-+	}
-+	digits[0] = value / 10;
-+	digits[1] = value % 10;
-+
-+	sagit_fill(base, row_bytes, x, y, width, height, 0);
-+	for (index = 0; index < 2; index++) {
-+		uint64_t dx = x + index * (3 * scale + gap);
-+
-+		for (row = 0; row < 5; row++) {
-+			for (column = 0; column < 3; column++) {
-+				if (sagit_digit_row[digits[index]][row] &
-+				    (4u >> column)) {
-+					sagit_fill(base, row_bytes,
-+					    dx + column * scale,
-+					    y + row * scale, scale, scale,
-+					    0xFFFFFFFF);
-+				}
-+			}
-+		}
-+	}
-+}
