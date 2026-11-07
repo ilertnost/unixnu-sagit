@@ -162,7 +162,7 @@ index 7187c15..9196539 100644
  	machine_startup(args);
  }
  
-index a688021..87a4682 100644
+index a688021..5aeeadd 100644
 --- a/osfmk/arm64/arm_vm_init.c
 +++ b/osfmk/arm64/arm_vm_init.c
 @@ -128,6 +128,248 @@ SECURITY_READ_ONLY_LATE(unsigned long) gPhysSize;
@@ -414,17 +414,18 @@ index a688021..87a4682 100644
  /* 23543331 - step 1 of kext / kernel __TEXT and __DATA colocation is to move
   * all kexts before the kernel.  This is only for arm64 devices and looks
   * something like the following:
-@@ -897,6 +1139,164 @@ arm_kva_to_tte(vm_offset_t va)
+@@ -897,6 +1139,180 @@ arm_kva_to_tte(vm_offset_t va)
  	return tte2;
  }
  
 +/*
-+ * Sub-ladder for sagit_map_fb(): a row of 18x18 red squares just under the
-+ * stage row, one per step of the mapping, so a single photo shows how far it
-+ * got. Steps 20 and 21 are the two give-up paths, 2 means the 1 GB slot had to
-+ * be built here.
++ * Sub-ladder: a row of 18x18 red squares just under the stage row, one per
++ * step, so a single photo shows how far a sequence got. sagit_map_fb() uses
++ * steps 0 to 8 (20 and 21 are its two give-up paths, 2 means the 1 GB slot had
++ * to be built here); the startup hook loop in kern/startup.c clears the row and
++ * starts again at 9.
 + */
-+static void
++void
 +sagit_dbg(unsigned step)
 +{
 +	uint64_t fb = sagit_ladder_fb;
@@ -434,6 +435,21 @@ index a688021..87a4682 100644
 +	}
 +	sagit_fill(fb, sagit_ladder_row, 64 + (uint64_t)step * 26, 208, 18, 18,
 +	    0xFFFF0000);
++}
++
++/*
++ * Wipe the sub-ladder row so that the marks of the last iteration are the only
++ * ones in the photograph; the row belongs to whichever bisect is running.
++ */
++void
++sagit_dbg_clear(void)
++{
++	uint64_t fb = sagit_ladder_fb;
++
++	if (!fb || !sagit_ladder_row) {
++		return;
++	}
++	sagit_fill(fb, sagit_ladder_row, 64, 208, 22 * 26, 18, 0);
 +}
 +
 +/*
@@ -579,7 +595,7 @@ index a688021..87a4682 100644
  #if XNU_MONITOR
  
  static inline pt_entry_t *
-@@ -1600,12 +2000,15 @@ arm_vm_physmap_init(boot_args *args)
+@@ -1600,12 +2016,15 @@ arm_vm_physmap_init(boot_args *args)
  	// Will be handed back to VM layer through ml_static_mfree() in arm_vm_prot_finalize()
  	arm_vm_physmap_slide(temp_ptov_table, gVirtBase, segLOWEST - gVirtBase, AP_RWNA,
  	    ARM64_GRANULE_ALLOW_BLOCK | ARM64_GRANULE_ALLOW_HINT);
@@ -595,7 +611,7 @@ index a688021..87a4682 100644
  
  	assert((temp_ptov_table[ptov_index - 1].va + temp_ptov_table[ptov_index - 1].len) <= physmap_end);
  
-@@ -1614,6 +2017,7 @@ arm_vm_physmap_init(boot_args *args)
+@@ -1614,6 +2033,7 @@ arm_vm_physmap_init(boot_args *args)
  	qsort(temp_ptov_table, PTOV_TABLE_SIZE, sizeof(temp_ptov_table[0]), cmp_ptov_entries);
  
  	memcpy(ptov_table, temp_ptov_table, sizeof(ptov_table));
@@ -603,7 +619,7 @@ index a688021..87a4682 100644
  }
  
  #endif // XNU_MONITOR
-@@ -1830,6 +2234,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -1830,6 +2250,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	vm_offset_t      ptpage_vaddr;
  	vm_map_address_t dynamic_memory_begin;
  
@@ -612,7 +628,7 @@ index a688021..87a4682 100644
  	/*
  	 * Get the virtual and physical kernel-managed memory base from boot_args.
  	 */
-@@ -1897,6 +2303,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -1897,6 +2319,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  #endif // ARM_LARGE_MEMORY
  #endif
  
@@ -621,7 +637,7 @@ index a688021..87a4682 100644
  #if KASAN && !defined(ARM_LARGE_MEMORY)
  	/* add the KASAN stolen memory to the physmap */
  	dynamic_memory_begin = static_memory_end + (shadow_ptop - shadow_pbase);
-@@ -1970,6 +2378,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -1970,6 +2394,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	real_avail_end = avail_end;
  #endif
  
@@ -630,7 +646,7 @@ index a688021..87a4682 100644
  	/*
  	 * Initialize l1 and l2 page table pages :
  	 *   map physical memory at the kernel base virtual address
-@@ -1989,6 +2399,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -1989,6 +2415,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  #endif
  
  
@@ -639,7 +655,7 @@ index a688021..87a4682 100644
  #if __ARM_KERNEL_PROTECT__
  	/* Expand the page tables to prepare for the EL0 mappings. */
  	arm_vm_expand_kernel_el0_mappings();
-@@ -2068,6 +2480,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -2068,6 +2496,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	}
  
  	(void) PE_parse_boot_argn("use_contiguous_hint", &use_contiguous_hint, sizeof(use_contiguous_hint));
@@ -648,7 +664,7 @@ index a688021..87a4682 100644
  	assert(segSizePRELINKTEXT < 0x03000000); /* 23355738 */
  
  	/* if one of the new segments is present, the other one better be as well */
-@@ -2103,6 +2517,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -2103,6 +2533,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  
  	arm_vm_prot_init(args);
  
@@ -657,7 +673,7 @@ index a688021..87a4682 100644
  	/*
  	 * Initialize the page tables for the low globals:
  	 *   cover this address range:
-@@ -2115,6 +2531,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -2115,6 +2547,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	*cpu_l2_tte = (kvtophys(ptpage_vaddr) & ARM_TTE_TABLE_MASK) | ARM_TTE_TYPE_TABLE | ARM_TTE_VALID | ARM_TTE_TABLE_PXN | ARM_TTE_TABLE_XN;
  	bzero((void *)ptpage_vaddr, ARM_PGBYTES);
  
@@ -666,7 +682,7 @@ index a688021..87a4682 100644
  	/*
  	 * Initialize l2 page table pages :
  	 *   cover this address range:
-@@ -2134,6 +2552,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -2134,6 +2568,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	init_ptpages(cpu_tte, dynamic_memory_begin, VM_MAX_KERNEL_ADDRESS, TRUE, ARM_DYNAMIC_TABLE_XN | ARM_TTE_TABLE_AP(ARM_TTE_TABLE_AP_USER_NA));
  #endif
  
@@ -675,7 +691,7 @@ index a688021..87a4682 100644
  #if KASAN
  	/* record the extent of the physmap */
  	physmap_vbase = physmap_base;
-@@ -2145,10 +2565,16 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -2145,10 +2581,16 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	mt_early_init();
  #endif /* CONFIG_CPU_COUNTERS */
  
@@ -692,7 +708,7 @@ index a688021..87a4682 100644
  
  #if XNU_MONITOR
  	ml_enable_monitor();
-@@ -2162,6 +2588,9 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -2162,6 +2604,9 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	cpu_tte = (tt_entry_t*)(phystokv(cpu_ttep));
  	invalid_tte = (tt_entry_t*)(phystokv(invalid_ttep));
  
@@ -702,7 +718,7 @@ index a688021..87a4682 100644
  	// From here on out, we're off the bootstrap translation tables.
  
  
-@@ -2255,6 +2684,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -2255,6 +2700,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  #endif
  	pmap_bootstrap(dynamic_memory_begin);
  
@@ -711,7 +727,7 @@ index a688021..87a4682 100644
  	disable_preemption();
  
  	/*
-@@ -2378,6 +2809,7 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -2378,6 +2825,7 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	pmap_static_allocations_done();
  #endif
  	first_avail = avail_start;
@@ -719,7 +735,7 @@ index a688021..87a4682 100644
  	patch_low_glo_static_region(args->topOfKernelData, avail_start - args->topOfKernelData);
  	enable_preemption();
  }
-@@ -2399,3 +2831,112 @@ kernel_text_contains(vm_offset_t addr)
+@@ -2399,3 +2847,112 @@ kernel_text_contains(vm_offset_t addr)
  	}
  	return segDATACONSTB <= addr && addr < (segDATACONSTB + segSizeDATACONST);
  }
@@ -1155,21 +1171,43 @@ index bca4c7c..edc80da 100644
  	// If x21 != 0, we're doing a warm reset, so we need to trampoline to the kernel pmap.
  	cbnz	x21, Ltrampoline
  
-index 8a82186..ed53543 100644
+index 8a82186..160086d 100644
 --- a/osfmk/kern/startup.c
 +++ b/osfmk/kern/startup.c
-@@ -136,6 +136,10 @@
+@@ -136,6 +136,13 @@
  extern void mbuf_tag_init(void);
  #endif
  
 +/* Bring-up ladder checkpoint, painted into the framebuffer from arm_vm_init.c. */
 +extern void sagit_step(void);
 +extern void sagit_pmap_ready(void);
++/* Sub-step marks for bisecting a failed startup hook batch. */
++extern void sagit_dbg(unsigned step);
++extern void sagit_dbg_clear(void);
 +
  #if CONFIG_XNUPOST
  #include <tests/ktest.h>
  #include <tests/xnupost.h>
-@@ -719,6 +723,9 @@ kernel_bootstrap_thread(void)
+@@ -408,12 +415,18 @@ kernel_startup_initialize_upto(startup_subsystem_id_t upto)
+ 			kprintf("%s[%d, rank %d]: %p(%p)\n", __func__,
+ 			    cur->subsystem, cur->rank, cur->func, cur->arg);
+ 		}
++		sagit_dbg_clear();
++		sagit_dbg(9);		/* about to log the subsystem */
+ 		startup_phase = cur->subsystem - 1;
+ 		kernel_startup_log(cur->subsystem);
++		sagit_dbg(10);		/* about to call the hook */
+ 		cur->func(cur->arg);
++		sagit_dbg(11);		/* hook returned */
+ 		startup_entry_cur = ++cur;
+ 	}
++	sagit_dbg(12);			/* about to log the target phase */
+ 	kernel_startup_log(upto);
++	sagit_dbg(13);			/* target phase logged */
+ 
+ 	if ((startup_debug & STARTUP_DEBUG_VERBOSE) &&
+ 	    upto >= STARTUP_SUB_KPRINTF) {
+@@ -719,6 +732,9 @@ kernel_bootstrap_thread(void)
  	 */
  	initialize_screen(NULL, kPEAcquireScreen);
  

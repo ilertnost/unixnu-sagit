@@ -370,6 +370,26 @@ pointer is set; 20 and 21 are the two refusals (slot not a table, entries not
 empty). The squares are cumulative, so the rightmost one is the last step that
 ran.
 
+The same row is the sub-ladder of the startup hook loop. Once the alias exists
+the ladder can paint after the switch, so a stop at a checkpoint only says
+which call died, not why: `kernel_startup_initialize_upto()` runs a whole batch
+of hooks behind a single checkpoint. `sagit_dbg()` is therefore exported, and
+`sagit_dbg_clear()` wipes the row at the top of every iteration of that loop so
+only the marks of the last iteration survive. The loop marks are 9 before
+`kernel_startup_log(cur->subsystem)`, 10 before `cur->func(cur->arg)`, 11 after
+the hook returns, 12 after the loop and 13 once `kernel_startup_log(upto)` has
+run. Since `kernel_startup_bootstrap()` consumes everything up to `LOCKS` and
+`arm_init()` asks for `KPRINTF`, the batch behind checkpoint 36 is exactly
+`_PE_init_kprintf`: 9 alone puts the fault in the subsystem log, 10 in the hook
+and 11 in the phase log or the bookkeeping after the hook.
+
+Which hook a checkpoint covers is not obvious from the source, because
+`kernel_startup_bootstrap()` sorts `__BOOTDATA,__init_entry_set` at runtime by
+(subsystem, rank) and the table in the file is unordered. `tools/startup-entries.py`
+parses that section out of the kernel that was actually flashed, applies the same
+sort and prints the entries with their ordinals, so `--subsystem 4` answers the
+question directly; run it on the unstripped Mach-O, the one the payload carries.
+
 The alias lives in the padding between the end of the physmap and
 `static_memory_end`, and that padding can run past the last 1 GB slot
 `init_ptpages()` created: the helper steps from `gVirtBase`, which sits 112 MB
