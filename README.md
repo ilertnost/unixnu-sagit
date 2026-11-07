@@ -53,6 +53,8 @@ sequence, a device-tree property) and the code around it is ours.
 | `tools/mksagit-payload.py` | builds the FAT16 payload volume UniXNU reads (`unixnu.toml`, kernel, ADT) |
 | `tools/make-sagit-adt.py`, `tools/adtinfo.py` | generate and inspect the Apple Device Tree for MSM8998 |
 | `tools/build-xnu-sagit.sh` | cross-builds XNU for sagit |
+| `tools/startup-entries.py` | lists the kernel startup hook table in execution order, for reading the bring-up ladder |
+| `tools/licence-audit.py` | per-file SPDX audit of the tree and the pinned third-party sources |
 | `kernel/sagit` | device tree, defconfig, board description and the UniXNU source lock |
 | `docs` | boot chain ADRs, EDK2/ADT/payload/XNU notes, GPIO map |
 
