@@ -253,6 +253,10 @@ would read as a hang.
 | 28 | dynamic range mapped |
 | 29 | cpu counters, before the physmap |
 | 91 | phase: `arm_set_user_tbi()` returned |
+| 94 | phase: physmap low slid region mapped |
+| 95 | phase: physmap window tail (DT, ramdisk, args) mapped |
+| 96 | phase: physmap rest of physmem mapped |
+| 97 | phase: physmap done, `ptov_table` sorted and copied |
 | 92 | phase: `arm_vm_physmap_init()` returned |
 | 93 | phase: `set_mmu_ttb_alternate()` returned, TTBR0 switch next |
 | 30 | TTBR0 replaced, KVA live (first cyan bar) |
@@ -350,12 +354,13 @@ Since this mapping exists before the switch, the ladder has no blind window. A
 photo that stops at 93 now says the kernel died in the TTBR0 write or the TLB
 flush itself, one that stops at 30 says it died before `pmap_bootstrap()`, and
 the bars after 30 are the checkpoints `arm_init()` and `kernel_bootstrap()` go
-through. A seventh square, magenta, at x=544, y=140 is painted by
-`sagit_map_fb()` itself, while the V=P map still works: if it is missing, the
-alias did not fit and the ladder is blind again after the switch, so 93 in a
-photo has to be read the old way. The phases are painted as 91, 92 and 93 so
-they cannot be mistaken for checkpoints; they do not advance the bar index, and
-the counter clamps at 99.
+through. Two more squares bracket `sagit_map_fb()`: magenta at x=544 while it
+runs, lime at x=624 once the alias is installed. That splits a stop at 91 (the
+last phase before either) into "died in `arm_vm_physmap_init`" (no magenta,
+with 94..97 narrowing it to one of the three slides), "died inside
+`sagit_map_fb`" (magenta but no lime) and "alias installed" (both). The phases
+are painted as 91..97 so they cannot be mistaken for checkpoints; they do not
+advance the bar index, and the counter clamps at 99.
 
 The framebuffer and the window are in *different* 1 GB regions (L1 index 2 vs
 1 on 4 KB granule with `T0SZ_BOOT` 26), so the framebuffer's L1 slot is empty
