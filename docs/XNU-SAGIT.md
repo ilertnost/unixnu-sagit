@@ -350,8 +350,12 @@ Since this mapping exists before the switch, the ladder has no blind window. A
 photo that stops at 93 now says the kernel died in the TTBR0 write or the TLB
 flush itself, one that stops at 30 says it died before `pmap_bootstrap()`, and
 the bars after 30 are the checkpoints `arm_init()` and `kernel_bootstrap()` go
-through. The phases are painted as 91, 92 and 93 so they cannot be mistaken for
-checkpoints; they do not advance the bar index, and the counter clamps at 99.
+through. A seventh square, magenta, at x=544, y=140 is painted by
+`sagit_map_fb()` itself, while the V=P map still works: if it is missing, the
+alias did not fit and the ladder is blind again after the switch, so 93 in a
+photo has to be read the old way. The phases are painted as 91, 92 and 93 so
+they cannot be mistaken for checkpoints; they do not advance the bar index, and
+the counter clamps at 99.
 
 The framebuffer and the window are in *different* 1 GB regions (L1 index 2 vs
 1 on 4 KB granule with `T0SZ_BOOT` 26), so the framebuffer's L1 slot is empty
