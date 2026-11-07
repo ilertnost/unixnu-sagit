@@ -73,11 +73,19 @@ fi
 # build tries to apply them again and fails. Reversing it here leaves a tree
 # that is exactly "all shared patches applied"; the filename order then puts
 # the ladder back on the very last pass.
+#
+# The cluster patch needs the same treatment for the same reason: it rewrites
+# the MAX_CPU_CLUSTERS line that sits three lines below MAX_CPUS in the hunk
+# native-smp-secondary.patch uses to recognise itself. With the cluster patch
+# left applied, that shared patch looks unapplied and the build tries to apply
+# it a second time, which fails on both files it touches.
 WORK="$SRC/out/sagit/tree/.cache/xnu-work"
-if git -C "$WORK" rev-parse --git-dir >/dev/null 2>&1 &&
-   git -C "$WORK" apply --reverse --check "$LADDER" 2>/dev/null; then
-  git -C "$WORK" apply --reverse "$LADDER"
-fi
+for PATCH in "$LADDER" "$CLUSTERS"; do
+  if git -C "$WORK" rev-parse --git-dir >/dev/null 2>&1 &&
+     git -C "$WORK" apply --reverse --check "$PATCH" 2>/dev/null; then
+    git -C "$WORK" apply --reverse "$PATCH"
+  fi
+done
 
 cd "$SRC"
 

@@ -272,6 +272,19 @@ addresses are the code, the framebuffer and `boot_args`; red instead of green
 identifies the one that is not mapped. This exists because a red framebuffer
 probe is what stopped the ladder at stage 2 in the first place.
 
+**A decimal readout** is painted in two places, the top right corner at
+(820, 120) and the bottom right one 90 pixels above the last row. It exists
+because the bars can be *measured* right up to the moment the phone reboots:
+the next boot's UniXNU menu is drawn over the same framebuffer, and its list
+box happens to cover the middle of the second column — bars 27 to 30, which
+is where `arm_vm_init()` hands the kernel over to the pmap. In the first
+photograph after the cluster fix the left column was clearly full and the
+right column disappeared under a blue menu highlight, so the stop could not be
+told from a hang at checkpoint 26. The number is drawn with a 3x5 digit font
+scaled to 8 pixels, cleared before each paint, and the bottom copy is
+positioned from the framebuffer height reported in `boot_args`, not from a
+hardcoded 1920.
+
 Five bars is where the third photograph stopped, and the reason was in
 `pexpert/pexpert/arm64/board_config.h`, not in the kernel: the BCM2837 board
 config that this build rides on declares `MAX_CPU_CLUSTERS 1`, so
@@ -326,7 +339,18 @@ The patch has to be the very last one applied, and it must start from a tree
 where it is *not* applied: the format-1 build decides whether a patch still
 needs applying by reverse-checking it, and the ladder's insertion points sit in
 the context that `native-4k-bootstrap-capacity.patch` and
-`zzz-boot-progress.patch` use for their own reverse-check. `tools/build-xnu-sagit.sh`
+`zzz-boot-progress.patch` use for their own reverse-check.
+
+For the same reason `tools/build-xnu-sagit.sh` reverses `zzzz-sagit-cpu-clusters.patch`
+alongside the ladder. The cluster patch rewrites the `MAX_CPU_CLUSTERS` line
+three lines below `MAX_CPUS`, which is part of the hunk
+`native-smp-secondary.patch` uses to recognise itself; left applied, that
+shared patch looks unapplied and the build tries to apply it a second time and
+fails on both files it touches. Reversing both keeps the tree at exactly "all
+shared patches applied", and the filename order puts the two device patches
+back on the last pass. The build fails loudly when this is wrong — the symptom
+is `native-smp-secondary.patch: patch does not apply` on `board_config.h` and
+`start.s`, not a kernel that builds but misbehaves. `tools/build-xnu-sagit.sh`
 therefore reverses the ladder before each build and exports `LC_ALL=C`, because
 in a UTF-8 locale the glob sorts `zzyb-` before `zzy-` and breaks the dependency
 order of the observation hooks.

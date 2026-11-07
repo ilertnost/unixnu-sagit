@@ -163,7 +163,7 @@
  
 --- a/osfmk/arm64/arm_vm_init.c
 +++ b/osfmk/arm64/arm_vm_init.c
-@@ -128,6 +128,211 @@
+@@ -128,6 +128,214 @@
  SECURITY_READ_ONLY_LATE(unsigned long) gT0Sz = T0SZ_BOOT;
  SECURITY_READ_ONLY_LATE(unsigned long) gT1Sz = T1SZ_BOOT;
  
@@ -223,6 +223,7 @@
 +static uint64_t sagit_ladder_bytes;
 +static uint64_t sagit_ladder_map;
 +static unsigned sagit_bar_next;
++static void sagit_number(uint64_t, uint32_t, unsigned, int);
 +static boolean_t sagit_kva_live;
 +
 +static void
@@ -367,6 +368,8 @@
 +	}
 +
 +	sagit_bar_paint(base, sagit_ladder_row, index, color);
++	sagit_number(base, sagit_ladder_row, index, 0);
++	sagit_number(base, sagit_ladder_row, index, 1);
 +	if (!overflow) {
 +		sagit_bar_next = index + 1;
 +	}
@@ -375,7 +378,7 @@
  /* 23543331 - step 1 of kext / kernel __TEXT and __DATA colocation is to move
   * all kexts before the kernel.  This is only for arm64 devices and looks
   * something like the following:
-@@ -1830,6 +2035,8 @@
+@@ -1830,6 +2038,8 @@
  	vm_offset_t      ptpage_vaddr;
  	vm_map_address_t dynamic_memory_begin;
  
@@ -384,7 +387,7 @@
  	/*
  	 * Get the virtual and physical kernel-managed memory base from boot_args.
  	 */
-@@ -1897,6 +2104,8 @@
+@@ -1897,6 +2107,8 @@
  #endif // ARM_LARGE_MEMORY
  #endif
  
@@ -393,7 +396,7 @@
  #if KASAN && !defined(ARM_LARGE_MEMORY)
  	/* add the KASAN stolen memory to the physmap */
  	dynamic_memory_begin = static_memory_end + (shadow_ptop - shadow_pbase);
-@@ -1970,6 +2179,8 @@
+@@ -1970,6 +2182,8 @@
  	real_avail_end = avail_end;
  #endif
  
@@ -402,7 +405,7 @@
  	/*
  	 * Initialize l1 and l2 page table pages :
  	 *   map physical memory at the kernel base virtual address
-@@ -1989,6 +2200,8 @@
+@@ -1989,6 +2203,8 @@
  #endif
  
  
@@ -411,7 +414,7 @@
  #if __ARM_KERNEL_PROTECT__
  	/* Expand the page tables to prepare for the EL0 mappings. */
  	arm_vm_expand_kernel_el0_mappings();
-@@ -2068,6 +2281,8 @@
+@@ -2068,6 +2284,8 @@
  	}
  
  	(void) PE_parse_boot_argn("use_contiguous_hint", &use_contiguous_hint, sizeof(use_contiguous_hint));
@@ -420,7 +423,7 @@
  	assert(segSizePRELINKTEXT < 0x03000000); /* 23355738 */
  
  	/* if one of the new segments is present, the other one better be as well */
-@@ -2103,6 +2318,8 @@
+@@ -2103,6 +2321,8 @@
  
  	arm_vm_prot_init(args);
  
@@ -429,7 +432,7 @@
  	/*
  	 * Initialize the page tables for the low globals:
  	 *   cover this address range:
-@@ -2115,6 +2332,8 @@
+@@ -2115,6 +2335,8 @@
  	*cpu_l2_tte = (kvtophys(ptpage_vaddr) & ARM_TTE_TABLE_MASK) | ARM_TTE_TYPE_TABLE | ARM_TTE_VALID | ARM_TTE_TABLE_PXN | ARM_TTE_TABLE_XN;
  	bzero((void *)ptpage_vaddr, ARM_PGBYTES);
  
@@ -438,7 +441,7 @@
  	/*
  	 * Initialize l2 page table pages :
  	 *   cover this address range:
-@@ -2134,6 +2353,8 @@
+@@ -2134,6 +2356,8 @@
  	init_ptpages(cpu_tte, dynamic_memory_begin, VM_MAX_KERNEL_ADDRESS, TRUE, ARM_DYNAMIC_TABLE_XN | ARM_TTE_TABLE_AP(ARM_TTE_TABLE_AP_USER_NA));
  #endif
  
@@ -447,7 +450,7 @@
  #if KASAN
  	/* record the extent of the physmap */
  	physmap_vbase = physmap_base;
-@@ -2145,6 +2366,8 @@
+@@ -2145,6 +2369,8 @@
  	mt_early_init();
  #endif /* CONFIG_CPU_COUNTERS */
  
@@ -456,7 +459,7 @@
  	arm_set_user_tbi();
  
  	arm_vm_physmap_init(args);
-@@ -2162,6 +2385,9 @@
+@@ -2162,6 +2388,9 @@
  	cpu_tte = (tt_entry_t*)(phystokv(cpu_ttep));
  	invalid_tte = (tt_entry_t*)(phystokv(invalid_ttep));
  
@@ -466,7 +469,7 @@
  	// From here on out, we're off the bootstrap translation tables.
  
  
-@@ -2255,6 +2481,8 @@
+@@ -2255,6 +2484,8 @@
  #endif
  	pmap_bootstrap(dynamic_memory_begin);
  
@@ -475,7 +478,7 @@
  	disable_preemption();
  
  	/*
-@@ -2378,6 +2606,7 @@
+@@ -2378,6 +2609,7 @@
  	pmap_static_allocations_done();
  #endif
  	first_avail = avail_start;
@@ -825,3 +828,98 @@
  	/*
  	 *	Initialize the shared region module.
  	 */
+--- a/osfmk/arm64/arm_vm_init.c
++++ b/osfmk/arm64/arm_vm_init.c
+@@ -2391,11 +2623,92 @@
+ bool
+ kernel_text_contains(vm_offset_t addr)
+ {
+ 	if (segTEXTB <= addr && addr < (segTEXTB + segSizeTEXT)) {
+ 		return true;
+ 	}
+ 	if (segTEXTEXECB <= addr && addr < (segTEXTEXECB + segSizeTEXTEXEC)) {
+ 		return true;
+ 	}
+ 	return segDATACONSTB <= addr && addr < (segDATACONSTB + segSizeDATACONST);
+ }
++/*
++ * Decimal readout of the checkpoint, painted in two corners.
++ *
++ * Measuring the bars works until the boot menu is redrawn over the
++ * framebuffer on the next boot: its boxes cover the middle of the second
++ * column, which is exactly where the interesting checkpoints land.  A number
++ * in a corner is read from the photograph instead of a stack being counted.
++ */
++#define SAGIT_COUNT_X       820
++#define SAGIT_COUNT_Y       120
++#define SAGIT_COUNT_MARGIN  90
++
++static const uint8_t sagit_digit_row[10][5] = {
++	{ 7, 5, 5, 5, 7 }, { 2, 6, 2, 2, 7 }, { 7, 1, 7, 4, 7 },
++	{ 7, 1, 7, 1, 7 }, { 5, 5, 7, 1, 1 }, { 7, 4, 7, 1, 7 },
++	{ 7, 4, 7, 5, 7 }, { 7, 1, 1, 1, 1 }, { 7, 5, 7, 5, 7 },
++	{ 7, 5, 7, 1, 7 },
++};
++
++static void
++sagit_fill(uint64_t base, uint32_t row_bytes, uint64_t x, uint64_t y,
++    uint64_t width, uint64_t height, uint32_t colour)
++{
++	uint64_t row, column;
++
++	for (row = 0; row < height; row++) {
++		uint64_t line = base + (y + row) * row_bytes + x * 4;
++
++		for (column = 0; column < width; column++) {
++			*(volatile uint32_t *)(uintptr_t)(line + column * 4) =
++			    colour;
++		}
++		sagit_clean(line, width * 4);
++	}
++	__asm__ volatile("dsb sy" : : : "memory");
++}
++
++static void
++sagit_number(uint64_t base, uint32_t row_bytes, unsigned value, int low)
++{
++	const uint64_t scale = 8;
++	const uint64_t gap = 8;
++	uint64_t width = (3 * scale) * 2 + gap;
++	uint64_t height = 5 * scale;
++	uint64_t x = SAGIT_COUNT_X;
++	uint64_t y = SAGIT_COUNT_Y;
++	unsigned digits[2];
++	unsigned index, row, column;
++
++	if (low) {
++		uint64_t rows = sagit_ladder_row ? sagit_ladder_bytes /
++		    sagit_ladder_row : 0;
++
++		if (rows < height + SAGIT_COUNT_MARGIN) {
++			return;
++		}
++		y = rows - height - SAGIT_COUNT_MARGIN;
++	}
++	if (value > 99) {
++		value = 99;
++	}
++	digits[0] = value / 10;
++	digits[1] = value % 10;
++
++	sagit_fill(base, row_bytes, x, y, width, height, 0);
++	for (index = 0; index < 2; index++) {
++		uint64_t dx = x + index * (3 * scale + gap);
++
++		for (row = 0; row < 5; row++) {
++			for (column = 0; column < 3; column++) {
++				if (sagit_digit_row[digits[index]][row] &
++				    (4u >> column)) {
++					sagit_fill(base, row_bytes,
++					    dx + column * scale,
++					    y + row * scale, scale, scale,
++					    0xFFFFFFFF);
++				}
++			}
++		}
++	}
++}
