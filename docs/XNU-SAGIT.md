@@ -362,6 +362,24 @@ with 94..97 narrowing it to one of the three slides), "died inside
 are painted as 91..97 so they cannot be mistaken for checkpoints; they do not
 advance the bar index, and the counter clamps at 99.
 
+A sub-ladder of 18x18 red squares sits at y=208, x=64+26*step, right under the
+stage row: 0 entered, 1 alias address chosen, 2 the 1 GB slot had to be built
+here, 3 the slot is a table, 4 the L2 page resolved, 5 every entry is empty, 6
+the block entries are written, 7 the `ptov_table` slot is filled, 8 the alias
+pointer is set; 20 and 21 are the two refusals (slot not a table, entries not
+empty). The squares are cumulative, so the rightmost one is the last step that
+ran.
+
+The alias lives in the padding between the end of the physmap and
+`static_memory_end`, and that padding can run past the last 1 GB slot
+`init_ptpages()` created: the helper steps from `gVirtBase`, which sits 112 MB
+into its own slot, so a range that ends before that offset in the next slot
+leaves the slot empty. `arm_kva_to_tte()` then reads a zero table address and
+`phystokv()` panics on it. `sagit_map_fb()` therefore inspects the L1 entry
+itself and builds the slot when it is missing, taking the page's physical
+address from `avail_start` rather than `kvtophys()`, which cannot translate a
+physmap address before the TTBR0 switch.
+
 The framebuffer and the window are in *different* 1 GB regions (L1 index 2 vs
 1 on 4 KB granule with `T0SZ_BOOT` 26), so the framebuffer's L1 slot is empty
 when the bootstrap map is built. The code therefore cannot simply fill L2
