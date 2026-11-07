@@ -374,11 +374,20 @@ The alias lives in the padding between the end of the physmap and
 `static_memory_end`, and that padding can run past the last 1 GB slot
 `init_ptpages()` created: the helper steps from `gVirtBase`, which sits 112 MB
 into its own slot, so a range that ends before that offset in the next slot
-leaves the slot empty. `arm_kva_to_tte()` then reads a zero table address and
-`phystokv()` panics on it. `sagit_map_fb()` therefore inspects the L1 entry
-itself and builds the slot when it is missing, taking the page's physical
-address from `avail_start` rather than `kvtophys()`, which cannot translate a
-physmap address before the TTBR0 switch.
+leaves the slot empty. `sagit_map_fb()` therefore inspects the L1 entry itself
+and builds the slot when it is missing.
+
+More importantly, `sagit_map_fb()` must not use `phystokv()` at all. Once
+`arm_vm_physmap_init()` copies its table into `ptov_table`, `phystokv()` starts
+answering with physmap addresses, but the physmap only exists in `cpu_tte` and
+TTBR1 is not pointed at `cpu_tte` until `set_mmu_ttb_alternate()`, which the
+caller runs afterwards. Between the copy and the switch, every physmap address
+is untranslated: `arm_kva_to_tte()` (through `L2_TABLE_VA()`) and any other
+`phystokv()` dereference there takes a data abort, and the ladder stops with
+the magenta square and without the lime one. The mapping code therefore
+translates through the V=P bootstrap map with `sagit_pa_to_va()`, and takes the
+page for a missing slot from `avail_start` by hand instead of `alloc_ptpage()`,
+which returns a `phystokv()` result.
 
 The framebuffer and the window are in *different* 1 GB regions (L1 index 2 vs
 1 on 4 KB granule with `T0SZ_BOOT` 26), so the framebuffer's L1 slot is empty
