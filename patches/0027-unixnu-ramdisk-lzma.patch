@@ -1,5 +1,5 @@
 diff --git a/package/UniXNUPkg/Driver/UniXNURamDiskDxe/UniXNURamDiskDxe.c b/package/UniXNUPkg/Driver/UniXNURamDiskDxe/UniXNURamDiskDxe.c
-index 7d4def5..41b4c1f 100644
+index 7d4def5..476a845 100644
 --- a/package/UniXNUPkg/Driver/UniXNURamDiskDxe/UniXNURamDiskDxe.c
 +++ b/package/UniXNUPkg/Driver/UniXNURamDiskDxe/UniXNURamDiskDxe.c
 @@ -10,6 +10,8 @@
@@ -88,7 +88,7 @@ index 7d4def5..41b4c1f 100644
  STATIC
  EFI_STATUS
  EFIAPI
-@@ -128,6 +197,90 @@ STATIC EFI_BLOCK_IO_PROTOCOL  mBlockIo = {
+@@ -128,6 +197,94 @@ STATIC EFI_BLOCK_IO_PROTOCOL  mBlockIo = {
    RamBlockFlush
  };
  
@@ -125,6 +125,7 @@ index 7d4def5..41b4c1f 100644
 +      ((Header->ExpandedSize % RAM_BLOCK_SIZE) != 0))
 +  {
 +    SetDiag ("lzma: header invalid");
++    DEBUG ((DEBUG_ERROR, "UNIXNURAMDISK: LZMA header invalid (size %u)\n", (UINT32)PayloadSize));
 +    return NULL;
 +  }
 +
@@ -161,9 +162,12 @@ index 7d4def5..41b4c1f 100644
 +    return NULL;
 +  }
 +
-+  Crc = 0;
-+  Status = gBS->CalculateCrc32 (Expanded, DestinationSize, &Crc);
-+  if (EFI_ERROR (Status) || (Crc != Header->RawCrc)) {
++  //
++  // gBS->CalculateCrc32 stays CoreEfiNotAvailableYetArg3 for the whole DXE
++  // lifetime of this basecore; the BaseLib implementation is the real one.
++  //
++  Crc = CalculateCrc32 ((VOID *)Expanded, DestinationSize);
++  if (Crc != Header->RawCrc) {
 +    FreePages (Expanded, EFI_SIZE_TO_PAGES (DestinationSize));
 +    DEBUG ((DEBUG_ERROR, "UNIXNURAMDISK: expanded payload CRC mismatch\n"));
 +    SetDiag ("lzma: expanded payload CRC mismatch");
@@ -179,7 +183,7 @@ index 7d4def5..41b4c1f 100644
  STATIC
  VOID
  PublishInitrd (
-@@ -142,11 +295,13 @@ PublishInitrd (
+@@ -142,11 +299,13 @@ PublishInitrd (
    INT32       EndLength;
    UINT64      Start;
    UINT64      End;
@@ -193,7 +197,7 @@ index 7d4def5..41b4c1f 100644
      return;
    }
  
-@@ -156,17 +311,35 @@ PublishInitrd (
+@@ -156,17 +315,43 @@ PublishInitrd (
        ((StartLength != 4) && (StartLength != 8)) || ((EndLength != 4) && (EndLength != 8)))
    {
      DEBUG ((DEBUG_ERROR, "UNIXNURAMDISK: no initrd in /chosen\n"));
@@ -213,11 +217,19 @@ index 7d4def5..41b4c1f 100644
  
 -  mRamBase                = (UINT8 *)(UINTN)Start;
 +  //
-+  // A compressed payload is tried first and needs no sector alignment;
-+  // a raw volume must be a whole number of sectors.
++  // A compressed payload is tried first and needs no sector alignment; a raw
++  // volume must be a whole number of sectors. The probe decides which path a
++  // payload belongs to, so a failed decompression never masks itself with a
++  // raw success.
 +  //
-+  mRamBase = ExpandLzmaPayload ((CONST VOID *)(UINTN)Start, (UINTN)(End - Start), &VolumeSize);
-+  if (mRamBase == NULL) {
++  if (((End - Start) >= sizeof (LZMA_PAYLOAD_HEADER)) &&
++      ((*(CONST UINT64 *)(UINTN)Start) == LZMA_PAYLOAD_MAGIC))
++  {
++    mRamBase = ExpandLzmaPayload ((CONST VOID *)(UINTN)Start, (UINTN)(End - Start), &VolumeSize);
++    if (mRamBase == NULL) {
++      return;
++    }
++  } else {
 +    if (((End - Start) % RAM_BLOCK_SIZE) != 0) {
 +      DEBUG ((DEBUG_ERROR, "UNIXNURAMDISK: initrd 0x%lx-0x%lx is not a whole number of sectors\n", Start, End));
 +      SetDiag ("raw payload is not sector aligned");
@@ -232,7 +244,7 @@ index 7d4def5..41b4c1f 100644
    mMedia.MediaId          = 1;
    mMedia.RemovableMedia   = FALSE;
    mMedia.MediaPresent     = TRUE;
-@@ -175,7 +348,7 @@ PublishInitrd (
+@@ -175,7 +360,7 @@ PublishInitrd (
    mMedia.WriteCaching     = FALSE;
    mMedia.BlockSize        = RAM_BLOCK_SIZE;
    mMedia.IoAlign          = 1;
@@ -241,7 +253,7 @@ index 7d4def5..41b4c1f 100644
  
    Handle = NULL;
    Status = gBS->InstallMultipleProtocolInterfaces (
-@@ -186,7 +359,7 @@ PublishInitrd (
+@@ -186,7 +371,7 @@ PublishInitrd (
                    &mBlockIo,
                    NULL
                    );
@@ -250,7 +262,7 @@ index 7d4def5..41b4c1f 100644
  }
  
  EFI_STATUS
-@@ -202,6 +375,7 @@ UniXNURamDiskDxeEntry (
+@@ -202,6 +387,7 @@ UniXNURamDiskDxeEntry (
    Hob = GetFirstGuidHob (&mEntryArgHobGuid);
    if (Hob == NULL) {
      DEBUG ((DEBUG_ERROR, "UNIXNURAMDISK: no entry argument HOB\n"));
@@ -258,7 +270,7 @@ index 7d4def5..41b4c1f 100644
      return EFI_SUCCESS;
    }
  
-@@ -212,6 +386,7 @@ UniXNURamDiskDxeEntry (
+@@ -212,6 +398,7 @@ UniXNURamDiskDxeEntry (
    Dtb = ReadUnaligned64 ((CONST UINT64 *)GET_GUID_HOB_DATA (Hob));
    if ((Dtb == 0) || ((Dtb & 3) != 0) || (FdtCheckHeader ((VOID *)(UINTN)Dtb) != 0)) {
      DEBUG ((DEBUG_ERROR, "UNIXNURAMDISK: x0 0x%lx is not a device tree\n", Dtb));
