@@ -37,6 +37,48 @@ STATIC CONST EFI_GUID  mStatusGuid = {
 
 STATIC CHAR16  mStatusName[] = L"SagitRamDisk";
 
+/* Protocols published by the vendor PMIC stack (SPMI + PmicDxe) that the
+ * patched ButtonsDxe consumes; locate them to see how far the chain got. */
+STATIC EFI_GUID  mQcomSpmiGuid = {
+  0xAE37B942, 0x457F, 0x4C91,
+  { 0xA1, 0x96, 0xD9, 0x66, 0x9F, 0xD3, 0x47, 0xA3 }
+};
+
+STATIC EFI_GUID  mQcomPmAppGuid = {
+  0x9BA45B66, 0xEFA4, 0x441C,
+  { 0xA3, 0xE4, 0xED, 0x22, 0x24, 0x78, 0x6B, 0xE2 }
+};
+
+STATIC
+VOID
+PrintButtons (VOID)
+{
+  EFI_GUID  *StiGuids[2] = {
+    (EFI_GUID *)&gEfiSimpleTextInProtocolGuid,
+    (EFI_GUID *)&gEfiSimpleTextInputExProtocolGuid
+  };
+  UINTN       Index;
+  EFI_HANDLE  *Buffer;
+  UINTN       Count;
+  VOID        *Proto;
+  EFI_STATUS  Status;
+
+  for (Index = 0; Index < 2; Index++) {
+    Status = gBS->LocateHandleBuffer (ByProtocol, StiGuids[Index], NULL, &Count, &Buffer);
+    if (EFI_ERROR (Status)) {
+      Print (L"sti[%u]: none (%r)\n", Index, Status);
+    } else {
+      Print (L"sti[%u]: %u handle(s)\n", Index, Count);
+      FreePool (Buffer);
+    }
+  }
+
+  Status = gBS->LocateProtocol (&mQcomSpmiGuid, NULL, &Proto);
+  Print (L"spmi protocol: %r\n", Status);
+  Status = gBS->LocateProtocol (&mQcomPmAppGuid, NULL, &Proto);
+  Print (L"pmic protocol: %r\n", Status);
+}
+
 STATIC
 UINT32
 Be32 (
@@ -385,6 +427,7 @@ OnReadyToBoot (
 
   Print (L"=== SAGIT DIAG ===\n");
   PrintStatus ();
+  PrintButtons ();
   PrintFdt ();
   PrintProbe ();
   ScanForPayload ();

@@ -33,5 +33,9 @@
 [Guids]
   gEfiEventReadyToBootGuid
 
+[Protocols]
+  gEfiSimpleTextInProtocolGuid
+  gEfiSimpleTextInputExProtocolGuid
+
 [Depex]
   TRUE
