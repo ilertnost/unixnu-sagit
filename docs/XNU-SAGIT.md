@@ -180,6 +180,28 @@ mach.development.bcm2837.unstripped.noctf
 could not find are now supplied by the source crypto, the pthread archive and
 the mockfs fixture.
 
+### Packaging under the Mi 6 boot-image limit
+
+The Mi 6 bootloader refuses boot images above 64 MiB, and the payload volume
+carrying the kernel is the bulk of one. Two facts decide the layout:
+
+- `emit_prelink` preserves the original cache file layout: the whole prelink
+  area rides along (222 kexts, not just the 31 selected ones) and the source
+  kernel's symbol table stays in `__LINKEDIT`. The prelinked kernel is
+  therefore 56 MB even though the selected closure is 7.4 MiB — the dead
+  passengers are never instantiated (the rebuilt `__PRELINK_INFO` lists only
+  the selected components) but they occupy the file.
+- The UniXNU payload contract is an uncompressed FAT volume inside the boot
+  image, so the kernel cannot be stored compressed.
+
+`tools/strip-prelinked-kernel.py` rewrites the file for the only consumers
+that matter: DarwinBoot reads LC_SEGMENT_64 alone, and XNU boots from memory.
+Segments are packed 4 KiB-aligned and the symbol-table commands are dropped;
+`__LINKEDIT` keeps its virtual extent with a zero file size. 56 MB becomes
+47.3 MiB, the POST HMAC is untouched (it covers the loaded `__text`), and the
+56 MiB volume plus the gzip'd firmware leaves ~8 MiB of headroom under the
+limit.
+
 ### Three patches to the driver
 
 `build kernel` used to call `kernel.prelink` unconditionally, and a source-only
