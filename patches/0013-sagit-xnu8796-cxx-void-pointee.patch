@@ -1,0 +1,31 @@
+diff --git a/osfmk/kern/kalloc.h b/osfmk/kern/kalloc.h
+index 535bc7b..4fe7b40 100644
+--- a/osfmk/kern/kalloc.h
++++ b/osfmk/kern/kalloc.h
+@@ -821,11 +821,24 @@ __options_decl(kt_granule_t, uint32_t, {
+  * @param ptr           the pointer whose type needs to be checked.
+  * @param type          the type which the pointer will be checked against.
+  */
++/*
++ * C++ forbids dereferencing a void pointer, and operator delete() receives
++ * one. Under C++ remove the pointer and reference from the expression type
++ * instead; under C the pointee is always available, void included.
++ */
++#if defined(__cplusplus) && __has_builtin(__remove_pointer) && \
++	__has_builtin(__remove_reference_t)
++#define KALLOC_POINTEE_TYPE(ptr) \
++	__remove_pointer(__remove_reference_t(__typeof__(ptr)))
++#else
++#define KALLOC_POINTEE_TYPE(ptr) __typeof__(*(ptr))
++#endif
++
+ #define KALLOC_TYPE_IS_COMPATIBLE_PTR(ptr, type)                   \
+ 	_Pragma("clang diagnostic push")                               \
+ 	_Pragma("clang diagnostic ignored \"-Wvoid-ptr-dereference\"") \
+-	(__builtin_xnu_types_compatible(__typeof__(*(ptr)), type) ||   \
+-	    __builtin_xnu_types_compatible(__typeof__(*(ptr)), void))  \
++	(__builtin_xnu_types_compatible(KALLOC_POINTEE_TYPE(ptr), type) ||   \
++	    __builtin_xnu_types_compatible(KALLOC_POINTEE_TYPE(ptr), void))  \
+ 	_Pragma("clang diagnostic pop")
+ 
+ #define KALLOC_TYPE_ASSERT_COMPATIBLE_POINTER(ptr, type) \

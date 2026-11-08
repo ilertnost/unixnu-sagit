@@ -1,0 +1,38 @@
+--- a/bsd/sys/mount.h
++++ b/bsd/sys/mount.h
+@@ -1281,6 +1281,14 @@
+ mount_t vfs_getvfs(fsid_t *fsid);
+ 
+ /*!
++ *  @function vfs_getvfs_with_vfsops
++ *  @abstract Given a filesystem ID, look up a mount structure, verify the vfsops
++ *  @param fsid Filesystem ID to look up.
++ *  @return Mountpoint if found and the vfsops matches the expected value, else NULL.  Note unmounting mountpoints can be returned.
++ */
++mount_t vfs_getvfs_with_vfsops(fsid_t *fsid, const struct vfsops *ops);
++
++/*!
+  *  @function vfs_mountedon
+  *  @abstract Check whether a given block device has a filesystem mounted on it.
+  *  @discussion Note that this is NOT a check for a covered vnode (the directory upon which
+
+--- a/bsd/vfs/vfs_subr.c
++++ b/bsd/vfs/vfs_subr.c
+@@ -1945,6 +1945,17 @@
+ 	return mount_list_lookupby_fsid(fsid, 0, 0);
+ }
+ 
++struct mount *
++vfs_getvfs_with_vfsops(fsid_t *fsid, const struct vfsops * const ops)
++{
++	mount_t mp = mount_list_lookupby_fsid(fsid, 0, 0);
++
++	if (mp != NULL && mp->mnt_op != ops) {
++		mp = NULL;
++	}
++	return mp;
++}
++
+ static struct mount *
+ vfs_getvfs_locked(fsid_t *fsid)
+ {

@@ -1,0 +1,162 @@
+diff --git a/scripts/build-arm-driver.py b/scripts/build-arm-driver.py
+index 4dcaa91..bbe858d 100644
+--- a/scripts/build-arm-driver.py
++++ b/scripts/build-arm-driver.py
+@@ -7,6 +7,14 @@ from pathlib import Path
+ import struct
+ import subprocess
+ 
++import os
++
++DEPLOYMENT_TARGET = os.environ.get('UNIXNU_DEPLOYMENT_TARGET', '17.0')
++TARGET_TRIPLE = 'arm64-apple-ios' + DEPLOYMENT_TARGET
++DEPLOYMENT_VERSION = [int(part) for part in DEPLOYMENT_TARGET.split('.')]
++EXPECTED_DEPLOYMENT = (2, (DEPLOYMENT_VERSION[0] << 16) |
++    ((DEPLOYMENT_VERSION[1] if len(DEPLOYMENT_VERSION) > 1 else 0) << 8))
++
+ ROOT = Path(__file__).resolve().parents[1]
+ parser = argparse.ArgumentParser(description=__doc__)
+ catalog = {entry['id']: entry for entry in tomllib.loads((ROOT / 'components.toml').read_text())['component']
+@@ -114,9 +122,9 @@ for _ in range(count):
+     if cmd == 0x32:
+         deployment = struct.unpack_from('<II', data, offset + 8)
+     offset += length
+-if deployment != (2, 0x110000):
++if deployment != EXPECTED_DEPLOYMENT:
+     raise SystemExit(f'Unexpected platform deployment {deployment}')
+ archive = out / ('lib' + identifier + '.a')
+ archive.unlink(missing_ok=True)
+ subprocess.run(['xcrun', 'ar', 'rcs', archive, destination], check=True)
+-print(f'{identifier}: -Werror build and actual ARM64/iOS 17 object audit passed')
++print(f'{identifier}: -Werror build and actual ARM64/iOS object audit passed')
+diff --git a/scripts/build-corecrypto-14.py b/scripts/build-corecrypto-14.py
+index 84dafbe..934d694 100755
+--- a/scripts/build-corecrypto-14.py
++++ b/scripts/build-corecrypto-14.py
+@@ -14,6 +14,14 @@ import subprocess
+ import struct
+ import sys
+ 
++import os
++
++DEPLOYMENT_TARGET = os.environ.get('UNIXNU_DEPLOYMENT_TARGET', '17.0')
++TARGET_TRIPLE = 'arm64-apple-ios' + DEPLOYMENT_TARGET
++DEPLOYMENT_VERSION = [int(part) for part in DEPLOYMENT_TARGET.split('.')]
++EXPECTED_DEPLOYMENT = (2, (DEPLOYMENT_VERSION[0] << 16) |
++    ((DEPLOYMENT_VERSION[1] if len(DEPLOYMENT_VERSION) > 1 else 0) << 8))
++
+ ROOT = Path(__file__).resolve().parents[1]
+ sys.path.insert(0, str(ROOT / 'scripts'))
+ import pbxproj
+@@ -74,7 +82,7 @@ for header in SOURCE.glob('*/corecrypto/*.h'):
+         link.symlink_to(header)
+ sdk = subprocess.check_output(['xcrun', '--sdk', 'iphoneos', '--show-sdk-path'], text=True).strip()
+ framework = ROOT / '.cache/fakeroot/System/Library/Frameworks/Kernel.framework/Versions/A'
+-command = ['xcrun', '--sdk', 'iphoneos', 'clang', '-target', 'arm64-apple-ios17.0', '-isysroot', sdk,
++command = ['xcrun', '--sdk', 'iphoneos', 'clang', '-target', TARGET_TRIPLE, '-isysroot', sdk,
+            '-mkernel', '-ffreestanding', '-fno-builtin', '-fno-stack-check', '-std=gnu99', '-fblocks', '-O2',
+            '-fno-vectorize', '-fno-slp-vectorize', '-mno-implicit-float',
+            '-DKERNEL=1', '-DKERNEL_PRIVATE=1', '-DBUILDKERNEL=1', '-DCC_USE_ASM=0', '-DNDEBUG=1',
+@@ -114,7 +122,7 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+ failed = [result for result in results if result['exit_code']]
+ report = {'source_url': 'https://github.com/ONLYA/corecrypto-2023', 'source_revision': REVISION,
+           'provenance': 'Third-party source snapshot; not authenticated against an Apple archive',
+-          'module_version': '14.0', 'target': 'arm64-apple-ios17.0', 'assembly_enabled': False,
++          'module_version': '14.0', 'target': TARGET_TRIPLE, 'assembly_enabled': False,
+           'compiled_sources': len(results), 'failures': len(failed), 'objects': results,
+           'kernel_provider_registered': False, 'crypto_selftests_passed': False}
+ (OUT / f'build-report{variant}.json').write_text(json.dumps(report, indent=2) + '\n')
+@@ -135,7 +143,7 @@ for result in results:
+         if cmd == 0x32:
+             deployment = struct.unpack_from('<II', data, offset + 8)
+         offset += length
+-    if deployment != (2, 0x110000):
++    if deployment != EXPECTED_DEPLOYMENT:
+         raise SystemExit(f'Wrong deployment: {result["object"]}: {deployment}')
+ archive = OUT / f'libcorecrypto_kernel_noasm{variant}.a'
+ archive.unlink(missing_ok=True)
+diff --git a/scripts/build-libpthread-kernel.py b/scripts/build-libpthread-kernel.py
+index c6ac860..95f95a3 100644
+--- a/scripts/build-libpthread-kernel.py
++++ b/scripts/build-libpthread-kernel.py
+@@ -6,6 +6,14 @@ import struct
+ import subprocess
+ import sys
+ 
++import os
++
++DEPLOYMENT_TARGET = os.environ.get('UNIXNU_DEPLOYMENT_TARGET', '17.0')
++TARGET_TRIPLE = 'arm64-apple-ios' + DEPLOYMENT_TARGET
++DEPLOYMENT_VERSION = [int(part) for part in DEPLOYMENT_TARGET.split('.')]
++EXPECTED_DEPLOYMENT = (2, (DEPLOYMENT_VERSION[0] << 16) |
++    ((DEPLOYMENT_VERSION[1] if len(DEPLOYMENT_VERSION) > 1 else 0) << 8))
++
+ ROOT = Path(__file__).resolve().parents[1]
+ sys.path.insert(0, str(ROOT / 'scripts'))
+ from xnu_symbols import kernel_names
+@@ -47,7 +55,7 @@ def compile_one(source, destination, namespace=None):
+             index += 1
+     else:
+         framework = ROOT / '.cache/fakeroot/System/Library/Frameworks/Kernel.framework/Versions/A'
+-        command = ['xcrun', '--sdk', 'iphoneos', 'clang', '-target', 'arm64-apple-ios17.0',
++        command = ['xcrun', '--sdk', 'iphoneos', 'clang', '-target', TARGET_TRIPLE,
+                    '-isysroot', sdk, '-mkernel', '-ffreestanding', '-fno-builtin', '-fno-stack-check',
+                    '-std=gnu11', '-fblocks', '-O2', '-mno-implicit-float',
+                    '-DKERNEL=1', '-DKERNEL_PRIVATE=1', '-DXNU_KERNEL_PRIVATE=1',
+@@ -72,7 +80,7 @@ def compile_one(source, destination, namespace=None):
+         if cmd == 0x32:
+             deployment = struct.unpack_from('<II', data, offset + 8)
+         offset += length
+-    if deployment != (2, 0x110000):
++    if deployment != EXPECTED_DEPLOYMENT:
+         raise SystemExit(f'Unexpected pthread deployment: {deployment}')
+ 
+ 
+@@ -100,7 +108,7 @@ imports = set().union(*(names(path, '-u') for path in objects)) - definitions
+ # The component is statically linked: os_log's DSO identity is the real
+ # executable Mach-O header, synthesized by the Mach-O executable linker.
+ missing = sorted(imports - kernel_names - {'___dso_handle'})
+-report = {'revision': REVISION, 'sources': 3, 'ordinary_arm64_ios17_audited': True,
++report = {'revision': REVISION, 'sources': 3, 'ordinary_arm64_ios_audited': True,
+           'namespace_collisions_isolated': sorted(collisions), 'missing_kernel_names': missing,
+           'linker_synthesized_symbols': ['___dso_handle'],
+           'registration_observed': False}
+@@ -113,4 +121,4 @@ archive = OUT / 'libpthread_kernel.a'
+ archive.unlink(missing_ok=True)
+ compile_one(ROOT / '.cache/xnu-work/bsd/kern/source_pthread_bootstrap.c', OUT / 'source_pthread_bootstrap.o')
+ subprocess.run(['xcrun', 'ar', 'rcs', archive, *objects, OUT / 'source_pthread_bootstrap.o'], check=True)
+-print('Matching libpthread: 3 real C sources + bootstrap, ARM64/iOS 17 audit, no unavailable kernel names')
++print('Matching libpthread: 3 real C sources + bootstrap, ARM64/iOS audit, no unavailable kernel names')
+diff --git a/scripts/build-mockfs-fixture.py b/scripts/build-mockfs-fixture.py
+index fd8574b..19d1cf4 100644
+--- a/scripts/build-mockfs-fixture.py
++++ b/scripts/build-mockfs-fixture.py
+@@ -5,6 +5,14 @@ from pathlib import Path
+ import struct
+ import subprocess
+ 
++import os
++
++DEPLOYMENT_TARGET = os.environ.get('UNIXNU_DEPLOYMENT_TARGET', '17.0')
++TARGET_TRIPLE = 'arm64-apple-ios' + DEPLOYMENT_TARGET
++DEPLOYMENT_VERSION = [int(part) for part in DEPLOYMENT_TARGET.split('.')]
++EXPECTED_DEPLOYMENT = (2, (DEPLOYMENT_VERSION[0] << 16) |
++    ((DEPLOYMENT_VERSION[1] if len(DEPLOYMENT_VERSION) > 1 else 0) << 8))
++
+ ROOT = Path(__file__).resolve().parents[1]
+ recipe = ROOT / 'build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/bsd/DEVELOPMENT/vfs_conf.o.json'
+ record = json.loads(recipe.read_text().strip().rstrip(','))
+@@ -44,11 +52,11 @@ for name in ('mockfs_fsnode', 'mockfs_vfsops', 'mockfs_vnops'):
+         if cmd == 0x32:
+             deployment = struct.unpack_from('<II', data, offset + 8)
+         offset += length
+-    if deployment != (2, 0x110000):
++    if deployment != EXPECTED_DEPLOYMENT:
+         raise SystemExit(f'Unexpected mockfs deployment: {deployment}')
+     objects.append(destination)
+ archive = out / 'libmockfs_fixture.a'
+ archive.unlink(missing_ok=True)
+ subprocess.run(['xcrun', 'ar', 'rcs', archive, *objects], check=True)
+-print('3 XNU mockfs sources compiled (typed-allocation correction retained); ordinary ARM64 / iOS 17 audited')
++print('3 XNU mockfs sources compiled (typed-allocation correction retained); ordinary ARM64 / iOS audited')
+ print('Offline minimal-root fixture only; not an APFS driver or iPadOS filesystem')

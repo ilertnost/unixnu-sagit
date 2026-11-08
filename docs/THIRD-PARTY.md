@@ -114,6 +114,24 @@ headers copied without their licence block, generated tables and `Info.plist`
 files live. They are `unresolved` and are not vendored until someone checks
 them individually.
 
+## Audit: `sing0626/UniXNU-marble`
+
+Commit `a632603`, reviewed for the arm64 KPC backend that the public
+`xnu-8796.141.3` tree omits. The repository is MIT (its `LICENSING.md` covers
+original additions; the file in question, `legacy-xnu/overlay/osfmk/arm64/kpc.c`,
+carries no separate notice, so it is checked by hand and kept under MIT).
+
+Our copy, `patches/0020-sagit-xnu8796-kpc-backend.patch`, adds the SPDX line,
+adds the `kpc_pmi_handler` stub that `monotonic_arm64.c` expects, and keeps the
+copyright and the full MIT permission text in the file.
+
+`patches/0021-sagit-xnu8796-pmap-preemption.patch` follows the same tree's
+approach for `pmap_pending_preemption()` (define the hygiene out-of-line
+wrapper on top of the public inline in `pmap_misc.c`); the four-line function
+is written here in our own words. No other file is taken from that tree; the
+AMCC, tunables and PPL overlays next to it are not used here (we keep those
+objects gated off instead).
+
 ## What this means in practice
 
 - The parts we can carry today without any further work are the ones that

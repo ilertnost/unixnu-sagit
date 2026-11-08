@@ -2,5 +2,47 @@
 # the very last patch applied, because its insertion points sit in the context
 # that native-4k-bootstrap-capacity.patch and zzz-boot-progress.patch use for
 # their own reverse checks. Paths are relative to this file.
+#
+# 0008..0015 replace the twelve iOS-17-only ARM64 patches that do not apply to
+# XNU 8796 (guard both the Apple tunables include and its APPLY_TUNABLES call,
+# gate the Apple AMCC objects,
+# widen pmap_sync_page_attributes_phys' physical shift, drop an Apple-clang
+# flag the Linux clang rejects, take the pointee type without dereferencing a
+# C++ void pointer, carry the DriverKit generator's IORPC.kernelContent, and
+# replace the over-aligned uio_stackbuf_t array with a rounded uint64_t one)
+# and come before the board fix, which needs native-smp-secondary's MAX_CPUS.
+# 0016 restores the -MJ compile records in makedefs/MakeInc.rule that the
+# archive builders (corecrypto, pthread, mockfs) replay; 8796 predates them.
+# 0017 backports the proc_get_jit_entitled callback name that Darwin 23's
+# libpthread source calls; 8796 still names the field proc_get_pthread_jit_allowlist.
+# 0019 is the 8796 port of source-machine-layer.patch's machine list: without
+# nos_arm_asm/nos_arm_pmap the source kernel gets neither pmap.o nor the source
+# start/cswitch/machine-routines objects that Apple's prelinked kernel supplies.
+# 0020 supplies the arm64 kpc backend that the public 8796 tree omits: kperf is
+# unconditional and needs kpc, but the PMU lives only in the closed KDK library.
+# 0021 defines pmap_pending_preemption() out of line for hygiene builds: pmap.h
+# declares it extern, yet the only definition ships in Apple's closed per-SoC
+# pmap, so without this the final kernel link fails on five pmap.o call sites.
+# 0023 teaches 8796's MakeInc.def the CFLAGS_EXTRA make variable: 10063 added
+# it, and the baseline script carries -DXNU_SOURCE_CORECRYPTO14 and the
+# boot-progress select in it, so without this the seal contract never compiles
+# in and the build stops at the POST HMAC step.
+# 0024 backports vfs_getvfs_with_vfsops from the 10063 drop: Apple's 8796
+# kernelcache exports it and the prelinked kexts bind it, but the public 8796
+# tree never shipped it, so the prelinker is left without a native candidate.
+../0008-sagit-xnu8796-tunables-guard.patch
+../0009-sagit-xnu8796-amcc-gating.patch
+../0010-sagit-xnu8796-pmap-ptoa.patch
+../0012-sagit-xnu8796-apple-clang-flag.patch
+../0013-sagit-xnu8796-cxx-void-pointee.patch
+../0014-sagit-xnu8796-kernelcontent-rpc.patch
+../0015-sagit-xnu8796-uio-stackbuf.patch
+../0016-sagit-xnu8796-compile-records.patch
+../0017-sagit-xnu8796-pthread-jit-callback.patch
+../0019-sagit-xnu8796-source-machine-layer.patch
+../0020-sagit-xnu8796-kpc-backend.patch
+../0021-sagit-xnu8796-pmap-preemption.patch
+../0023-sagit-xnu8796-cflags-extra.patch
+../0024-sagit-xnu8796-vfs-getvfs-vfsops.patch
 ../0007-sagit-cpu-clusters.patch
-../0006-sagit-boot-ladder.patch
+# ../0006-sagit-boot-ladder.patch   # ported after the plain 8796 build links

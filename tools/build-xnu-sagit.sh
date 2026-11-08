@@ -9,7 +9,7 @@
 #   SRC=/path/to/unixnu-src TOOLCHAIN=/path/to/unixnu-toolchain \
 #     tools/build-xnu-sagit.sh
 #
-# Output: $SRC/out/sagit/ipados-17.7.11-21H461/sagit/tree/build/xnu/
+# Output: $SRC/out/sagit/ios-16.7.16-20H392/sagit/tree/build/xnu/
 #         ios-obj/DEVELOPMENT_ARM64_BCM2837/
 #         mach.development.bcm2837.unstripped.noctf
 
@@ -38,11 +38,49 @@ test -x "$TOOLCHAIN/llvm/bin/clang" || {
   exit 1
 }
 
-# One local change to the driver. It prelinks unconditionally, and a
-# source-only board has no [kernel.prelink] and no Apple kexts to merge, so a
-# successful link used to end in a failed build. Applied idempotently.
+# The OS profile lives in this repository. The driver resolves os:<path>
+# against $SRC/profiles/os/<name>, so install it every run and let a changed
+# profile replace the previous copy; other profiles are left alone.
+mkdir -p "$SRC/profiles/os"
+rm -rf "$SRC/profiles/os/ios-16.7.16-20H392"
+cp -a "$DEVICE_DIR/profiles/os/ios-16.7.16-20H392" "$SRC/profiles/os/"
+
+# The 20H392 thin kernelcache is unpacked from the user's IPSW. Prelink pins
+# its SHA-256, so a different cache fails before anything is written.
+export UNIXNU_KERNELCACHE=${UNIXNU_KERNELCACHE:-/data/opencode/ipsw/dmg/kernelcache.arm64}
+
+# Local changes to the driver. It prelinks unconditionally, and a source-only
+# board has no [kernel.prelink] and no Apple kexts to merge, so a successful
+# link used to end in a failed build. Applied idempotently.
 if ! grep -q 'A source-only board has no \[kernel.prelink\]' "$SRC/scripts/unixnu/cli.py"; then
   git -C "$SRC" apply "$PATCHES/0003-unixnu-prelink-when-specified.patch"
+fi
+
+# The driver hard-codes the iOS 17 target triple. The OS profile carries the
+# target and SDK version instead, so the 8796 build is compiled for iOS 16 and
+# an iOS 17 profile still gets its own triple.
+if ! grep -q "the profile's iOS version" "$SRC/scripts/unixnu/kernel.py"; then
+  git -C "$SRC" apply "$PATCHES/0011-unixnu-ios-target.patch"
+fi
+
+# The archive builders assert the iOS 17 deployment they were written against
+# and compile their own sources with arm64-apple-ios17.0. Take the target from
+# the same OS profile as the kernel instead, so a 16.0 build stays 16.0 from
+# the first object to the final link.
+if ! grep -q "DEPLOYMENT_TARGET = os.environ" "$SRC/scripts/build-libpthread-kernel.py"; then
+  git -C "$SRC" apply "$PATCHES/0018-unixnu-archive-deployment.patch"
+fi
+
+# 8796's MakeInc.kernel predates the .noctf kernel naming; the seal step and
+# the prelink read that variant, so the CTF-free .unstripped is aliased to it.
+if ! grep -q "predates the .noctf naming" "$SRC/scripts/build-xnu-4k-baseline.sh"; then
+  git -C "$SRC" apply "$PATCHES/0022-unixnu-8796-noctf-alias.patch"
+fi
+
+# The 20H392 Libm kext carries math tables the prelink kit's literal-pool list
+# predates; its scanner reads the new records as out-of-range encodings.
+if ! grep -q "newer Libm whose tables" "$SRC/kits/XnuPrelink/emit_prelink.py"; then
+  git -C "$SRC/kits/XnuPrelink" apply "$PATCHES/0025-unixnu-prelink-20h392-libm-pools.patch"
 fi
 
 # The device patch series (patches/xnu/series) carries the bring-up ladder
@@ -58,12 +96,7 @@ echo "== config =="
 echo "== kernel =="
 ./unixnu build kernel
 
-KERNEL="$SRC/out/sagit/ipados-17.7.11-21H461/sagit/tree/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837.unstripped.noctf"
-if [ ! -f "$KERNEL" ]; then
-  # Fall back to the format-1 output location while the first format-2 build
-  # is being verified.
-  KERNEL="$SRC/out/sagit/tree/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837.unstripped.noctf"
-fi
+KERNEL="$SRC/out/sagit/ios-16.7.16-20H392/sagit/tree/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837.unstripped.noctf"
 echo "== output =="
 ls -l "$KERNEL"
 sha256sum "$KERNEL"

@@ -1,0 +1,33 @@
+["os"]
+"name" = "ios-16.7.16-20H392"
+"darwin" = "22.6.0"
+"xnu_version" = "8796.141.3"
+"xnu_revision" = "1b191cb58250d0705d8a51287127505aa4bc0789"
+"driverkit_tag" = "xnu-8796.141.3"
+"trustcache_tag" = "xnu-8796.101.5"
+"target" = "arm64-apple-ios16.0"
+"sdk" = "16.0"
+"abi" = ["IOGPUFamily", "IOHIDFamily", "IOMobileGraphicsFamily"]
+
+
+["ipsw"]
+# The thin kernelcache used for prelink is unpacked locally from the same
+# 20H392 restore as the device tree; it is passed through UNIXNU_KERNELCACHE
+# rather than downloaded here.
+"product" = "iPhone10,1"
+"version" = "16.7.16"
+"build" = "20H392"
+"device_class" = "d20ap"
+"chip_id" = 32785
+"board_id" = 2
+"fetch" = ["KernelCache", "DeviceTree", "StaticTrustCache", "Cryptex1,SystemTrustCache"]
+
+
+["kernel"]
+
+["kernel"."prelink"]
+"tool" = "kits/XnuPrelink/emit_prelink.py"
+"kernel" = "build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837.unstripped.noctf"
+"kernelcache_sha256" = "ae36144edbd1aebce562b662ed0c19053c95026d0950eeab5c9e695fe72e2f71"
+"slide" = "-0x1000000"
+"roots" = ["com.apple.AppleFSCompression.AppleFSCompressionTypeZlib", "com.apple.driver.AppleARMPlatform", "com.apple.driver.AppleARMWatchdogTimer", "com.apple.driver.AppleAudioClockLibs", "com.apple.driver.AppleEffaceableStorage", "com.apple.driver.AppleIISController", "com.apple.driver.AppleM2ScalerCSCDriver", "com.apple.driver.AppleMobileFileIntegrity", "com.apple.driver.ApplePMGR", "com.apple.driver.IODARTFamily", "com.apple.filesystems.apfs", "com.apple.iokit.CoreAnalyticsFamily", "com.apple.iokit.IOAVFamily", "com.apple.iokit.IOAudio2Family", "com.apple.iokit.IOCECFamily", "com.apple.iokit.IOCryptoAcceleratorFamily", "com.apple.iokit.IOGPUFamily", "com.apple.iokit.IOHDCPFamily", "com.apple.iokit.IOMobileGraphicsFamily", "com.apple.iokit.IOReportFamily", "com.apple.iokit.IOSlowAdaptiveClockingFamily", "com.apple.iokit.IOStorageFamily", "com.apple.iokit.IOSurface", "com.apple.kec.Libm", "com.apple.kec.corecrypto", "com.apple.kext.AppleMatch", "com.apple.kext.CoreTrust", "com.apple.security.AppleImage4", "com.apple.security.sandbox", "com.apple.iokit.IOHIDFamily", "com.apple.iokit.IOHIDEventDriver"]

@@ -1,0 +1,26 @@
+diff --git a/osfmk/arm/pmap/pmap_misc.c b/osfmk/arm/pmap/pmap_misc.c
+index b820595..30a0441 100644
+--- a/osfmk/arm/pmap/pmap_misc.c
++++ b/osfmk/arm/pmap/pmap_misc.c
+@@ -37,6 +37,21 @@
+  * own file.
+  */
+ 
++#if SCHED_HYGIENE_DEBUG && (DEBUG || DEVELOPMENT) && !XNU_MONITOR
++/*
++ * pmap.h declares pmap_pending_preemption() out of line for hygiene builds,
++ * but the public 8796 tree ships no definition: Apple keeps it in the closed
++ * per-SoC pmap. Without the PPL there is no extra state to consult, so the
++ * public inline answers the question. Same approach the audited UniXNU-marble
++ * tree takes (see docs/THIRD-PARTY.md).
++ */
++bool
++pmap_pending_preemption(void)
++{
++	return _pmap_pending_preemption_real();
++}
++#endif /* SCHED_HYGIENE_DEBUG && (DEBUG || DEVELOPMENT) && !XNU_MONITOR */
++
+ 
+ void
+ pmap_abandon_measurement(void)

@@ -1,0 +1,107 @@
+diff --git a/iokit/DriverKit/IORPC.h b/iokit/DriverKit/IORPC.h
+index 3ded78c..d085432 100644
+--- a/iokit/DriverKit/IORPC.h
++++ b/iokit/DriverKit/IORPC.h
+@@ -224,6 +224,14 @@ struct IORPC {
+ 	IORPCMessageMach * reply;
+ 	uint32_t           sendSize;
+ 	uint32_t           replySize;
++#ifdef KERNEL
++	/*
++	 * The parsed message header. iOS 17's DriverKit generator emits calls
++	 * through this field, so the 8796 kernel carries it too; callers that
++	 * only have a Mach header leave it NULL and the dispatch paths parse it.
++	 */
++	IORPCMessage     * kernelContent;
++#endif /* KERNEL */
+ };
+ typedef struct IORPC IORPC;
+ 
+diff --git a/iokit/IOKit/IORPC.h b/iokit/IOKit/IORPC.h
+index 3ded78c..d085432 100644
+--- a/iokit/IOKit/IORPC.h
++++ b/iokit/IOKit/IORPC.h
+@@ -224,6 +224,14 @@ struct IORPC {
+ 	IORPCMessageMach * reply;
+ 	uint32_t           sendSize;
+ 	uint32_t           replySize;
++#ifdef KERNEL
++	/*
++	 * The parsed message header. iOS 17's DriverKit generator emits calls
++	 * through this field, so the 8796 kernel carries it too; callers that
++	 * only have a Mach header leave it NULL and the dispatch paths parse it.
++	 */
++	IORPCMessage     * kernelContent;
++#endif /* KERNEL */
+ };
+ typedef struct IORPC IORPC;
+ 
+diff --git a/iokit/Kernel/IOUserServer.cpp b/iokit/Kernel/IOUserServer.cpp
+index 5d1d922..c677aa4 100644
+--- a/iokit/Kernel/IOUserServer.cpp
++++ b/iokit/Kernel/IOUserServer.cpp
+@@ -2377,10 +2377,14 @@ OSMetaClassBase::Invoke(IORPC rpc)
+ 	IORPCMessage    * message;
+ 
+ 	assert(rpc.sendSize >= (sizeof(IORPCMessageMach) + sizeof(IORPCMessage)));
+-	message = IORPCMessageFromMach(rpc.message, false);
++	message = rpc.kernelContent;
++	if (!message) {
++		message = IORPCMessageFromMach(rpc.message, false);
++	}
+ 	if (!message) {
+ 		return kIOReturnIPCError;
+ 	}
++	rpc.kernelContent = message;
+ 	message->flags |= kIORPCMessageKernel;
+ 
+ 	us = NULL;
+@@ -3050,10 +3054,14 @@ IOUserServer::kernelDispatch(OSObject * obj, IORPC rpc)
+ 	IOReturn       ret;
+ 	IORPCMessage * message;
+ 
+-	message = IORPCMessageFromMach(rpc.message, false);
++	message = rpc.kernelContent;
++	if (!message) {
++		message = IORPCMessageFromMach(rpc.message, false);
++	}
+ 	if (!message) {
+ 		return kIOReturnIPCError;
+ 	}
++	rpc.kernelContent = message;
+ 
+ 	if (OSObject_Instantiate_ID == message->msgid) {
+ 		ret = objectInstantiate(obj, rpc, message);
+@@ -3209,7 +3217,7 @@ IOUserServer::server(ipc_kmsg_t requestkmsg, ipc_kmsg_t * pReply)
+ 		msgout = (typeof(msgout))ikm_header(replykmsg);
+ 	}
+ 
+-	IORPC rpc = { .message = msgin, .reply = msgout, .sendSize = msgin->msgh.msgh_size, .replySize = replyAlloc };
++	IORPC rpc = { .message = msgin, .reply = msgout, .sendSize = msgin->msgh.msgh_size, .replySize = replyAlloc, .kernelContent = message };
+ 
+ 	if (object) {
+ 		kern_allocation_name_t prior;
+@@ -3358,6 +3366,7 @@ IOUserServerUEXTTrap(OSObject * object, void * p1, void * p2, void * p3, void *
+ 	rpc.sendSize  = mach->msgh.msgh_size;
+ 	rpc.reply     = (IORPCMessageMach *) (p + inSize);
+ 	rpc.replySize = ((uint32_t) (sizeof(buffer.buffer) - inSize));    // inSize was checked
++	rpc.kernelContent = message;
+ 
+ 	message->objects[0] = 0;
+ 	if ((action = OSDynamicCast(OSAction, object))) {
+@@ -3450,10 +3459,14 @@ IOUserServer::rpc(IORPC rpc)
+ 
+ 	assert(sendSize >= (sizeof(IORPCMessageMach) + sizeof(IORPCMessage)));
+ 
+-	message = IORPCMessageFromMach(mach, false);
++	message = rpc.kernelContent;
++	if (!message) {
++		message = IORPCMessageFromMach(mach, false);
++	}
+ 	if (!message) {
+ 		return kIOReturnIPCError;
+ 	}
++	rpc.kernelContent = message;
+ 	msgid   = message->msgid;
+ 	machid  = (msgid >> 32);
+ 

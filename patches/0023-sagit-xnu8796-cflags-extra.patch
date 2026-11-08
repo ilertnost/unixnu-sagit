@@ -1,0 +1,25 @@
+--- a/makedefs/MakeInc.def
++++ b/makedefs/MakeInc.def
+@@ -549,6 +549,12 @@
+ CFLAGS_GEN += -fsanitize-ignorelist=$(OBJROOT)/san/kasan-blacklist-$(CURRENT_ARCH_CONFIG_LC)
+ endif
+ 
++# Any extra flags that get passed at the command line during build. 8796
++# predates the variable; the baseline build script carries the source-corecrypto
++# and boot-progress selects in it.
++ifeq ($(CFLAGS_EXTRA),)
++CFLAGS_EXTRA =
++endif
+ 
+ CFLAGS	= $(CFLAGS_GEN) \
+ 		  $($(addsuffix $(CURRENT_MACHINE_CONFIG),MACHINE_FLAGS_$(CURRENT_ARCH_CONFIG)_)) \
+@@ -559,7 +565,8 @@
+ 		  $(DEPLOYMENT_TARGET_FLAGS) \
+ 		  $(DEPLOYMENT_TARGET_DEFINES) \
+ 		  $(BOUND_CHECKS_DEFINES) \
+-		  $(DEFINES)
++		  $(DEFINES) \
++		  $(CFLAGS_EXTRA)
+ 
+ #
+ # Default C++ flags

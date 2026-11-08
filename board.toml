@@ -10,7 +10,7 @@ schema_version = 2
 name = "sagit"
 soc = "MSM8998"
 soc_source = "msm8998"
-os_profile = "ipados-17.7.11-21H461"
+os_profile = "ios-16.7.16-20H392"
 description = "Xiaomi Mi 6 (sagit), Snapdragon 835, 4 or 6 GB"
 kit = "sagit"
 
@@ -22,10 +22,10 @@ defconfig = "sagit_defconfig"
 config_fragments = [
   "arch:configs/common.config",
   "soc:configs/msm8998.config",
-  "os:configs/ipados.config",
+  "os:configs/ios.config",
 ]
 patch_series = [
-  "arch:patches/xnu/series",
+  "os:patches/xnu/series-arch",
   "soc:patches/xnu/series",
   "os:patches/xnu/series",
   "device:patches/xnu/series",

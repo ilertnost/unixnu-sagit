@@ -1,0 +1,48 @@
+# ARM64 patches that apply to XNU 8796 (iOS 16). Same relative paths as
+# profiles/arch/arm64/patches/xnu/series; this file is installed at the same depth.
+# The twelve patches that need iOS 17 context are replaced by 0008..0010 or
+# are not needed for a storage-less bring-up.
+../../../../../patches/xnu/architectural-timer-entry.patch
+../../../../../patches/xnu/armvirt-platform-personality.patch
+../../../../../patches/xnu/cxx-flag-dependencies.patch
+../../../../../patches/xnu/disabled-deferred-reclaim.patch
+../../../../../patches/xnu/kernel-sdk-root.patch
+../../../../../patches/xnu/local-availability.patch
+../../../../../patches/xnu/mockfs-intermediate-lookup.patch
+../../../../../patches/xnu/mockfs-memory-device-width.patch
+../../../../../patches/xnu/mockfs-statfs.patch
+../../../../../patches/xnu/mockfs-test-file.patch
+../../../../../patches/xnu/mockfs-typed-allocation.patch
+../../../../../patches/xnu/native-4k-bootstrap-capacity.patch
+../../../../../patches/xnu/native-4k-signature-hash-cache.patch
+../../../../../patches/xnu/native-4k-user-abi.patch
+../../../../../patches/xnu/native-arm-pan.patch
+../../../../../patches/xnu/native-dt-panic-region.patch
+../../../../../patches/xnu/native-lookup-trace.patch
+../../../../../patches/xnu/native-priv-work-interval.patch
+../../../../../patches/xnu/native-quiet-managed-page-report.patch
+../../../../../patches/xnu/native-text-fixup.patch
+../../../../../patches/xnu/native-trust-cache-runtime.patch
+../../../../../patches/xnu/native-union-getattrlistbulk.patch
+../../../../../patches/xnu/native-union-lower-directory.patch
+../../../../../patches/xnu/native-work-interval-soft-fail.patch
+../../../../../patches/xnu/native-work-interval-trace.patch
+../../../../../patches/xnu/native-work-interval-instance.patch
+../../../../../patches/xnu/non-apple-cache-monitor.patch
+../../../../../patches/xnu/non-apple-iommu-bootstrap.patch
+../../../../../patches/xnu/non-apple-pmap-field.patch
+../../../../../patches/xnu/null-root-media.patch
+../../../../../patches/xnu/offline-component-load-probes.patch
+../../../../../patches/xnu/offline-legacy-start.patch
+../../../../../patches/xnu/offline-native-gpu-broker.patch
+../../../../../patches/xnu/offline-owner-boot-manifest.patch
+../../../../../patches/xnu/offline-owner-cache-carrier.patch
+../../../../../patches/xnu/offline-owner-root-binding-audit.patch
+../../../../../patches/xnu/offline-owner-root-crypto-probe.patch
+../../../../../patches/xnu/offline-owner-z-air-init.patch
+../../../../../patches/xnu/offline-pgz-alignment-probe.patch
+../../../../../patches/xnu/source-corecrypto14-bootstrap.patch
+../../../../../patches/xnu/source-pthread-bootstrap.patch
+../../../../../patches/xnu/zzw-native-adreno-sandbox-grant.patch
+../../../../../patches/xnu/zzwb-native-sandbox-grant-set-properties.patch
+../../../../../patches/xnu/zzyc-owner-skip-launch-constraints.patch

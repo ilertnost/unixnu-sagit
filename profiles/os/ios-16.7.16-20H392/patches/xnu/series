@@ -1,0 +1,4 @@
+# XNU 8796 already carries the source layout the prelink kit patches expect.
+# The boot-progress observation hook is iOS 17 context and is not selected.
+component:XnuPrelink/patches/xnu-10063.141.1-security-init.patch
+component:XnuPrelink/patches/xnu-10063.141.1-sparse-index.patch

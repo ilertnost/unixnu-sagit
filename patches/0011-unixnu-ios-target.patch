@@ -1,0 +1,49 @@
+diff --git a/scripts/build-xnu-4k-baseline.sh b/scripts/build-xnu-4k-baseline.sh
+index a036489..532bc94 100755
+--- a/scripts/build-xnu-4k-baseline.sh
++++ b/scripts/build-xnu-4k-baseline.sh
+@@ -798,8 +798,8 @@ make -C .cache/xnu-work "${XNU_BUILD_TARGET:-build}" SDKROOT="${XNU_SDKROOT:-iph
+   MACHINE_CONFIGS=BCM2837 KERNEL_CONFIGS=DEVELOPMENT \
+   ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG=arm64 LARGE_MEMORY_DEFINE=-UARM_LARGE_MEMORY \
+   ARM64_LINK_ADDR=0xfffffff007004000 ARM64_PLKSEG_ADDR=0xfffffff004004000 \
+-  DEPLOYMENT_TARGET_FLAGS="-miphoneos-version-min=17.0 -DXNU_TARGET_OS_IOS" \
+-  DEPLOYMENT_LINKER_FLAGS="-Wl,-ios_version_min,17.0" \
++  DEPLOYMENT_TARGET_FLAGS="-miphoneos-version-min=${UNIXNU_DEPLOYMENT_TARGET:-17.0} -DXNU_TARGET_OS_IOS" \
++  DEPLOYMENT_LINKER_FLAGS="-Wl,-ios_version_min,${UNIXNU_DEPLOYMENT_TARGET:-17.0}" \
+   RC_DARWIN_KERNEL_VERSION="$XNU_DARWIN" RC_ProjectSourceVersion="$XNU_VERSION" \
+   BUILD_LTO=0 BOUND_CHECKS=0 BUILD_WERROR="${XNU_BUILD_WERROR:-0}" MAKEJOBS=-j"${JOBS:-4}" \
+   CFLAGS_EXTRA="$EXTRA_CFLAGS" "${EXTRA_MAKE_ARGS[@]}" ${XNU_HOST_MAKE_ARGS[@]+"${XNU_HOST_MAKE_ARGS[@]}"} \
+diff --git a/scripts/unixnu/kernel.py b/scripts/unixnu/kernel.py
+index 19558bd..bc34d05 100644
+--- a/scripts/unixnu/kernel.py
++++ b/scripts/unixnu/kernel.py
+@@ -58,12 +58,14 @@ def linux_env(ctx):
+     """Environment of the kernel step on a Linux host, with the toolchain of scripts/linux/setup-toolchain.py.
+ 
+     The xcrun shim answers every --sdk query with the fakeroot this build makes. The target is plain arm64 for
+-    iOS 17, so the clang wrapper adds only the flag that keeps C++ static destructors in __mod_term_func.
++    the profile's iOS version, so the clang wrapper adds only the flag that keeps C++ static destructors in __mod_term_func.
+     CCC_OVERRIDE_OPTIONS (read by the clang driver itself, so also by the archive builders that replay xnu's
+     compile records) turns off two warnings that upstream clang has and Apple clang does not; the builders compile
+     with -Werror.
+     """
+     toolchain = Path(os.environ.get('UNIXNU_TOOLCHAIN', '/opt/unixnu-linux'))
++    os_profile = ctx.board.get('os', {})
++    sdk_version = os_profile.get('sdk', '17.0')
+     clt, xctoolchain = toolchain / 'CommandLineTools/usr', toolchain / 'XcodeDefault.xctoolchain/usr'
+     for path in (toolchain / 'llvm/bin/clang', clt / 'bin/ld', clt / 'bin/xnu-host-cc', clt / 'libexec/migcom',
+                  xctoolchain / 'bin/iig', Path('/usr/bin/xcrun'), toolchain / 'bin/lzfse'):
+@@ -73,9 +75,11 @@ def linux_env(ctx):
+     return {'PATH': os.pathsep.join([str(clt / 'bin'), str(toolchain / 'bin'), os.environ.get('PATH', '')]),
+             'LC_ALL': 'C', 'CLT_PREFIX': str(clt), 'XCTOOLCHAIN_PREFIX': str(xctoolchain),
+             'XNU_TOOLCHAIN_BIN': f'{clt / "bin"} {xctoolchain / "bin"}',
+-            'UNIXNU_SDKROOT': str(fakeroot), 'UNIXNU_SDK_VERSION': '17.0',
++            'UNIXNU_SDKROOT': str(fakeroot), 'UNIXNU_SDK_VERSION': sdk_version,
++            'UNIXNU_DEPLOYMENT_TARGET': sdk_version,
+             'UNIXNU_PLATFORM_PATH': str(fakeroot / 'Platforms/iPhoneOS.platform'),
+-            'CROSS_CLANG': str(toolchain / 'llvm/bin/clang'), 'DARWIN_TRIPLE': 'arm64-apple-ios17.0',
++            'CROSS_CLANG': str(toolchain / 'llvm/bin/clang'),
++            'DARWIN_TRIPLE': os_profile.get('target', 'arm64-apple-ios17.0'),
+             'CROSS_EXTRA_FLAGS': '-mllvm -disable-atexit-based-global-dtor-lowering',
+             'CCC_OVERRIDE_OPTIONS': '# +-Wno-missing-designated-field-initializers +-Wno-unused-but-set-global'}
+ 

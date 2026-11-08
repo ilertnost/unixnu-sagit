@@ -47,22 +47,55 @@ bin/lzfse             kernelcache codec
 The shims default to `/opt/unixnu-linux`; the build driver reads
 `UNIXNU_TOOLCHAIN` instead, so export it rather than relocating the prefix.
 
-## Version: iOS 17 by default, iOS 16 is the target
+## Version: XNU 8796 for iOS 16.7.16 (20H392)
 
-The driver compiles XNU `10063.141.1` (the iOS 17 base) and passes
-`-target arm64-apple-ios17.0`; both are fixed in `scripts/unixnu/kernel.py`.
-That is fine for a first compile and link, and it is what chiron does.
+The board pins the OS profile `ios-16.7.16-20H392` (`profiles/os/`). It carries
+XNU `8796.141.3` (Darwin `22.6.0`), the target triple `arm64-apple-ios16.0`,
+SDK `16.0`, and the SHA-256 of the 20H392 thin kernelcache. The resolver builds:
 
-It is **not** fine for the real bring-up. 20H392 carries XNU **8796**, and the
+- the upstream iOS 17 arch patches that still apply (44 of them,
+  `os:patches/xnu/series-arch`),
+- the SoC patches,
+- our 8796 compatibility patches (`patches/0008`–`0024`),
+- the CPU-cluster fix (`patches/0007`),
+- the bring-up ladder (`patches/0006`), applied last.
+
+The iOS 17 profile (`ipados-17.7.11-21H461`) stays in the driver for
+comparison, but it is not the Mi 6 target. 20H392 carries XNU **8796**, and the
 prelink step merges our kernel with the kexts of *that* kernelcache; a 10063
-source build does not match its ABI. Pinning `xnu-8796.101.5` and
-`arm64-apple-ios16.0` is therefore a prerequisite for anything beyond stage 1.
+source build does not match its ABI. The 8796 build has its own issues, all
+carried as device patches:
+
+| Patch | Why 8796 needs it |
+|---|---|
+| `0008` | 8796 includes the Apple tunables and applies them unconditionally |
+| `0009` | the Apple AMCC objects are not gated |
+| `0010` | `pmap_sync_page_attributes_phys` shifts a 32-bit physical address |
+| `0012` | an Apple-clang-only auto-var-init acknowledgement flag |
+| `0013` | C++ `operator delete(void *)` reaches `__typeof__(*(ptr))` |
+| `0014` | the newer DriverKit generator emits `IORPC.kernelContent` |
+| `0015` | `uio_stackbuf_t` is a char array with 8-byte alignment |
+| `0016` | 8796 has no `-MJ` compile records for the archive builders |
+| `0017` | Darwin 23 libpthread calls `proc_get_jit_entitled`, absent on 8796 |
+| `0019` | 8796's machine list lacks `nos_arm_asm nos_arm_pmap`, so it links no source pmap or start/cswitch/machine-routines |
+| `0020` | the public 8796 tree omits `osfmk/arm64/kpc.c`; the empty backend keeps kperf linked |
+| `0021` | `pmap.h` declares `pmap_pending_preemption()` out of line for hygiene builds, but its only definition ships in Apple's closed per-SoC pmap |
+| `0023` | 8796's `MakeInc.def` predates the `CFLAGS_EXTRA` variable the baseline script carries `-DXNU_SOURCE_CORECRYPTO14` in |
+| `0024` | Apple's 20H392 cache exports `vfs_getvfs_with_vfsops`, absent from the public 8796 tree; backported from 10063 |
+
+`0011` is not a kernel patch: it makes the Linux driver read the target triple
+and deployment version from the OS profile instead of hard-coding iOS 17.
+`0018` is the same for the archive builders. `0022` is a driver patch too:
+8796's MakeInc.kernel predates the `.noctf` kernel naming, so the linked
+`.unstripped` (this build runs no CTF merge) is aliased to it for the seal
+step and the prelink.
 
 
 ## Our board
 
-`xnu/sagit/` is a format-1 device profile: `board.toml`, a defconfig, a device
-tree for the board and one for the SoC.
+`board.toml` at the repository root is a format-2 device profile: the board
+description, the defconfig, the reserved-memory device tree and the OS profile
+it pins. The old format-1 profile is preserved under `old/sagit/`.
 
 The reserved-memory map in `dts/sagit.dts` is not invented — it was extracted
 from the Mi 6's own Android device tree, which is the authoritative source for
@@ -100,9 +133,10 @@ which is, in full:
 
 ```sh
 export TMPDIR=/data/opencode/tmp UNIXNU_TOOLCHAIN=/data/opencode/unixnu-toolchain
+# Installs profiles/os/ios-16.7.16-20H392 into the driver, applies 0003 and
+# 0011 to the driver, and pins the 20H392 kernelcache for prelink.
 cd /data/opencode/unixnu-src
-./unixnu defconfig sagit_defconfig -D .
-./unixnu fetch
+./unixnu defconfig sagit_defconfig -D /data/opencode/unixnu-sagit
 ./unixnu build kernel
 ```
 
@@ -111,9 +145,15 @@ from scratch runs one pass that compiles everything and is expected to stop at
 the link: the archive builders read the compile records that pass leaves
 behind, so there is nothing to read on a fresh tree.
 
+XNU 8796 predates the `-MJ $(@:o=o.json)` compile records that the archive
+builders replay, so `patches/0016-sagit-xnu8796-compile-records.patch` adds
+them to the assembly, C and C++ rules in `makedefs/MakeInc.rule`. Without it
+the bootstrap pass leaves no records, the driver treats its expected link
+failure as fatal, and the archives cannot be built.
+
 ### What has to be named explicitly
 
-A format-1 profile does not build drivers from their component entries. Two
+A format-2 board does not build drivers from their component entries. Two
 switches decide what happens between the bootstrap pass and the final link:
 
 - `[kernel] archives` in `board.toml` — the ordered list of builders.
@@ -140,13 +180,26 @@ mach.development.bcm2837.unstripped.noctf
 could not find are now supplied by the source crypto, the pthread archive and
 the mockfs fixture.
 
-### One patch to the driver
+### Three patches to the driver
 
 `build kernel` used to call `kernel.prelink` unconditionally, and a source-only
 board has no `[kernel.prelink]`, so a successful link ended with a failed build
 and a non-zero exit. `patches/0003-unixnu-prelink-when-specified.patch` makes
-the prelink step conditional on the board asking for it. `tools/build-xnu-sagit.sh`
-applies it idempotently.
+the prelink step conditional on the board asking for it.
+
+The driver also hard-codes XNU 10063's `-target arm64-apple-ios17.0` and the
+`17.0` deployment version. `patches/0011-unixnu-ios-target.patch` reads both
+from the OS profile (`os.target`, `os.sdk`), so the 8796 build is compiled for
+iOS 16 and the iOS 17 profile keeps its own triple.
+
+The archive builders had the same iOS 17 assumption: they compile their own
+sources with `arm64-apple-ios17.0` and refuse any object whose LC_BUILD_VERSION
+is not `(2, 0x110000)`. `patches/0018-unixnu-archive-deployment.patch` takes the
+triple and the expected deployment from `UNIXNU_DEPLOYMENT_TARGET`, which
+`0011` exports from the same `os.sdk`, so libpthread, corecrypto, the platform
+components and the mockfs fixture all stay on 16.0.
+
+`tools/build-xnu-sagit.sh` applies all three idempotently.
 
 ## Kernel output
 
@@ -185,9 +238,8 @@ Text only appears in `kernel_bootstrap()`, after `initialize_screen(NULL,
 kPEAcquireScreen)`; `PE_create_console` merely prepares the console. A fault
 anywhere between the loader's branch and that point is therefore silent, so the
 kernel reports progress straight into the handoff framebuffer
-(`patches/0006-sagit-boot-ladder.patch`, installed as
-`patches/xnu/zzzz-sagit-boot-ladder.patch` in the UniXNU tree so that it is
-applied after every shared patch).
+(`patches/0006-sagit-boot-ladder.patch`, the last entry of the device series in
+`patches/xnu/series`, so that it is applied after every shared patch).
 
 Reading a photograph of a dim screen turned out to be the hard part: adjacent
 coloured squares blur into each other and magenta, purple and teal are the same
@@ -335,43 +387,40 @@ answer for a framebuffer outside reported memory, but it needs `pmap_bootstrap()
 and the kernel map, so it cannot be called at the switch either: the board
 reset there, which is what stopped the very first version of the ladder at 29.
 
-`sagit_map_fb()` therefore maps the framebuffer before the hole opens. Right
-after `arm_vm_physmap_init()`, while the kernel tables are still writable and
-TTBR1 has not been loaded, it writes 2 MB block entries for the framebuffer and
-records the result in a spare `ptov_table` slot, so `phystokv()` agrees with the
-ladder from the switch onwards. The virtual address is the tail of the padding
-`physmap_end` reserves for block alignment: `PTOV_TABLE_SIZE` twigs past the last
-translated byte, with `static_memory_end` exactly equal to `physmap_end` for this
-geometry and nothing ever allocated there. That makes it independent of the
-random physmap slide and of the size of the boot window, and the function checks
-that the space is still free before it writes anything. The attributes are
-write-combining because that is what `initialize_screen()` gives the framebuffer;
-two live mappings of one page must not disagree about cacheability. The ladder's
-own stores are cleaned to DRAM either way, because the display controller scans
-memory directly.
+The switch itself is bridged with the invalid TTBR0 root. `arm_vm_init()`
+already builds `invalid_tte` for the window between `set_mmu_ttb()` and the
+real user map; the patch adds 2 MB block entries covering every block of the
+framebuffer at its physical address (`c11b503`). The ladder therefore keeps
+painting at `0x9d400000` across the switch, with no alias and no second
+mapping.
 
-Since this mapping exists before the switch, the ladder has no blind window. A
-photo that stops at 93 now says the kernel died in the TTBR0 write or the TLB
-flush itself, one that stops at 30 says it died before `pmap_bootstrap()`, and
-the bars after 30 are the checkpoints `arm_init()` and `kernel_bootstrap()` go
-through. Two more squares bracket `sagit_map_fb()`: magenta at x=544 while it
-runs, lime at x=624 once the alias is installed. That splits a stop at 91 (the
-last phase before either) into "died in `arm_vm_physmap_init`" (no magenta,
-with 94..97 narrowing it to one of the three slides), "died inside
-`sagit_map_fb`" (magenta but no lime) and "alias installed" (both). The phases
-are painted as 91..97 so they cannot be mistaken for checkpoints; they do not
-advance the bar index, and the counter clamps at 99.
+`ml_io_map_unmappable()` enters only after `initialize_screen()` has run.
+`sagit_pmap_ready()` flips `sagit_pmap_live` right after that call, and the
+next checkpoint selects a view: `phystokv()` when the physmap covers the
+framebuffer, otherwise one lazy `ml_io_map_unmappable(..., VM_WIMG_WCOMB)`.
+Here the physmap is exactly the 256 MB loader window
+(`0x44C04000..0x54C04000`) and does not cover it, so the lazy mapping is the
+path taken. Calling it earlier is a silent crash, which is why the physical
+address remains in use until `sagit_pmap_ready()`.
+
+The ladder's own stores are cleaned to DRAM, because the display controller
+scans memory directly.
+
+Since the invalid root keeps the framebuffer reachable, the ladder has no
+blind window. A photo that stops at 93 says the kernel died in the TTBR0 write
+or the TLB flush itself, one that stops at 30 says it died before
+`pmap_bootstrap()`, and the bars after 30 are the checkpoints `arm_init()` and
+`kernel_bootstrap()` go through. `sagit_step()` marks sub-steps 22..25 while it
+paints; `sagit_mark_phase()` paints 91..97 for the physmap stages without
+advancing the bar index, and the counter clamps at 99.
 
 A sub-ladder of 18x18 red squares sits at y=208, x=64+26*step, right under the
-stage row: 0 entered, 1 alias address chosen, 2 the 1 GB slot had to be built
-here, 3 the slot is a table, 4 the L2 page resolved, 5 every entry is empty, 6
-the block entries are written, 7 the `ptov_table` slot is filled, 8 the alias
-pointer is set; 20 and 21 are the two refusals (slot not a table, entries not
-empty). The squares are cumulative, so the rightmost one is the last step that
-ran.
+stage row. `sagit_step()` uses 22..25 while painting a bar. The startup hook
+loop clears the row and starts again at 9, so the rightmost square is the last
+step that ran.
 
-The same row is the sub-ladder of the startup hook loop. Once the alias exists
-the ladder can paint after the switch, so a stop at a checkpoint only says
+The same row is the sub-ladder of the startup hook loop. Once the invalid root
+is in place the ladder can paint after the switch, so a stop at a checkpoint only says
 which call died, not why: `kernel_startup_initialize_upto()` runs a whole batch
 of hooks behind a single checkpoint. `sagit_dbg()` is therefore exported, and
 `sagit_dbg_clear()` wipes the row at the top of every iteration of that loop so
@@ -390,25 +439,6 @@ parses that section out of the kernel that was actually flashed, applies the sam
 sort and prints the entries with their ordinals, so `--subsystem 4` answers the
 question directly; run it on the unstripped Mach-O, the one the payload carries.
 
-The alias lives in the padding between the end of the physmap and
-`static_memory_end`, and that padding can run past the last 1 GB slot
-`init_ptpages()` created: the helper steps from `gVirtBase`, which sits 112 MB
-into its own slot, so a range that ends before that offset in the next slot
-leaves the slot empty. `sagit_map_fb()` therefore inspects the L1 entry itself
-and builds the slot when it is missing.
-
-More importantly, `sagit_map_fb()` must not use `phystokv()` at all. Once
-`arm_vm_physmap_init()` copies its table into `ptov_table`, `phystokv()` starts
-answering with physmap addresses, but the physmap only exists in `cpu_tte` and
-TTBR1 is not pointed at `cpu_tte` until `set_mmu_ttb_alternate()`, which the
-caller runs afterwards. Between the copy and the switch, every physmap address
-is untranslated: `arm_kva_to_tte()` (through `L2_TABLE_VA()`) and any other
-`phystokv()` dereference there takes a data abort, and the ladder stops with
-the magenta square and without the lime one. The mapping code therefore
-translates through the V=P bootstrap map with `sagit_pa_to_va()`, and takes the
-page for a missing slot from `avail_start` by hand instead of `alloc_ptpage()`,
-which returns a `phystokv()` result.
-
 The framebuffer and the window are in *different* 1 GB regions (L1 index 2 vs
 1 on 4 KB granule with `T0SZ_BOOT` 26), so the framebuffer's L1 slot is empty
 when the bootstrap map is built. The code therefore cannot simply fill L2
@@ -421,25 +451,11 @@ fatal right after it: the store of stage 3 takes a translation fault, the
 exception vector is at a valid KVA, and the board simply stops with the cyan
 square on screen.
 
-The patch has to be the very last one applied, and it must start from a tree
-where it is *not* applied: the format-1 build decides whether a patch still
-needs applying by reverse-checking it, and the ladder's insertion points sit in
-the context that `native-4k-bootstrap-capacity.patch` and
-`zzz-boot-progress.patch` use for their own reverse-check.
-
-For the same reason `tools/build-xnu-sagit.sh` reverses `zzzz-sagit-cpu-clusters.patch`
-alongside the ladder. The cluster patch rewrites the `MAX_CPU_CLUSTERS` line
-three lines below `MAX_CPUS`, which is part of the hunk
-`native-smp-secondary.patch` uses to recognise itself; left applied, that
-shared patch looks unapplied and the build tries to apply it a second time and
-fails on both files it touches. Reversing both keeps the tree at exactly "all
-shared patches applied", and the filename order puts the two device patches
-back on the last pass. The build fails loudly when this is wrong — the symptom
-is `native-smp-secondary.patch: patch does not apply` on `board_config.h` and
-`start.s`, not a kernel that builds but misbehaves. `tools/build-xnu-sagit.sh`
-therefore reverses the ladder before each build and exports `LC_ALL=C`, because
-in a UTF-8 locale the glob sorts `zzyb-` before `zzy-` and breaks the dependency
-order of the observation hooks.
+The format-2 resolver applies the selected series in order on a fresh clone
+(`patches/xnu/series`: arch, SoC, OS, then device) whenever the source revision
+or any patch changes. The ladder is the last entry of the device series and
+`0007-sagit-cpu-clusters.patch` precedes it; the series order is the dependency
+order, so no reverse-check dance is involved.
 
 A real terminal over USB is ADR-0006.
 

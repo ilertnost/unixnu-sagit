@@ -1,0 +1,27 @@
+diff --git a/emit_prelink.py b/emit_prelink.py
+index 719b8b2..85294d5 100644
+--- a/emit_prelink.py
++++ b/emit_prelink.py
+@@ -23,6 +23,22 @@ MATH_LITERAL_POOLS = (
+     ('0000c1c00000807fff799f501344d33f', 1088, '22b9e038ad1cbdef1265a71f9213354287637a561eaa52f9ec25f90d10bd0a7c'),
+     ('0000c1c00000807f0000000084aec68f', 212, '43ef8598a507444b21d8a2abbe4065554baaa3b6a29dbe390465cc0ba0dfbe28'),
+     ('9b1a86a049faa8bd053f4e7b9dee213e', 56, 'e874aeba59eebdebdf68d18b1196d1ca6aeee12b110985a856f8fe404e0c76ee'),
++    # The 20H392 kernelcache ships a newer Libm whose tables carry records the
++    # pools above do not cover. Each row pins 32 bytes of table data holding a
++    # word that decodes as an out-of-range PC-relative reference (sagit, iOS
++    # 16.7.16); the digest matches the bytes exactly, so real code never does.
++    ('485f9df0a754003d000000c746f209bf', 32, '9f80db512a75f52d45f543d3797505a4681d4b056df7b278a722a31ecec940e5'),
++    ('485f9df0a754003d000000c746f209bf', 32, 'b7ea061e72f3f006c32149fad5800257879258fea4f81f311a6855227d722ef6'),
++    ('485f9df0a754003d000000e4e436e83e', 32, '5b15b3028bdd8adb66b2443e53b178505f556dfdf20a152c1be7744968a80f0b'),
++    ('485f9df0a754003d0000006f6c24cfbe', 32, '98ab807f122d5bd22fef71debb6c988e19618826cf4917093d8a06ebcad576fc'),
++    ('1259567041c57ebb00000060adbe6bbd', 32, '2337c9036dab62fc2a388922cff050736c5745fb0e3099107c9797f323fa855e'),
++    ('1259567041c57ebb00000060adbe6bbd', 32, 'abb5fccfaf179aa84fd7f4114b53b957e9ceff1f720d15cc95c9a6aafc189690'),
++    ('1259567041c57ebb0000007f4a05413d', 32, '33ba144dfe14c93abba07abd835dfef14ac00d64ec4959b17fb614b5eacc0336'),
++    ('b54eb2b70000007e449695b938de6133', 32, '50975510801ea7597f7be3fa8ad15af3b699ac9e73ab8fcf085509cf91b47cf2'),
++    ('b54eb2b70000000377d3843990433c99', 32, 'b2dbdbfc32c2f59e1c433eb2868d694c444dc6170a9e06ecabfd6693383de826'),
++    ('130c549603bc20c05b3a9eb49af02ec0', 32, '95b03ae34b5d322050846deeaf6706b6f9c0903bfdb6970f25f97ea1a7a812b1'),
++    ('5b3a9eb49af02ec0378c6cde5a6f2dc0', 32, 'e3f42bac3ac9861098b82529e3a811bfce45407916deb354698703f4f6bb78f4'),
++    ('2c34999489bc243fd521974e369c4d3f', 32, '7164aa9095842f2d3b5d771e5410c8cc8cc9c34b5d8baeace4d812e6072b6d1b'),
+ )
+ COALESCED = {'__PRELINK_TEXT': '__TEXT', '__PLK_TEXT_EXEC': '__TEXT_EXEC',
+              '__PLK_DATA_CONST': '__DATA_CONST', '__PRELINK_DATA': '__DATA'}
