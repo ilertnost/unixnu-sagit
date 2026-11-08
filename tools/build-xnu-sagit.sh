@@ -83,6 +83,12 @@ if ! grep -q "newer Libm whose tables" "$SRC/kits/XnuPrelink/emit_prelink.py"; t
   git -C "$SRC/kits/XnuPrelink" apply "$PATCHES/0025-unixnu-prelink-20h392-libm-pools.patch"
 fi
 
+# The coalesced prelink segments are bound to the occupied span instead of the
+# whole original cache, so the file does not carry 30 MiB of zero fill.
+if ! grep -q "occupied coalesced span" "$SRC/kits/XnuPrelink/emit_prelink.py"; then
+  git -C "$SRC/kits/XnuPrelink" apply "$PATCHES/0026-unixnu-prelink-span-shrink.patch"
+fi
+
 # The device patch series (patches/xnu/series) carries the bring-up ladder
 # and the CPU-cluster fix. The resolver applies the full selected series —
 # arch, SoC, OS, then device, ladder last — on a fresh clone whenever the

@@ -1,0 +1,105 @@
+diff --git a/emit_prelink.py b/emit_prelink.py
+index 719b8b2..2f85345 100644
+--- a/emit_prelink.py
++++ b/emit_prelink.py
+@@ -23,6 +23,32 @@ MATH_LITERAL_POOLS = (
+     ('0000c1c00000807fff799f501344d33f', 1088, '22b9e038ad1cbdef1265a71f9213354287637a561eaa52f9ec25f90d10bd0a7c'),
+     ('0000c1c00000807f0000000084aec68f', 212, '43ef8598a507444b21d8a2abbe4065554baaa3b6a29dbe390465cc0ba0dfbe28'),
+     ('9b1a86a049faa8bd053f4e7b9dee213e', 56, 'e874aeba59eebdebdf68d18b1196d1ca6aeee12b110985a856f8fe404e0c76ee'),
++    # The 20H392 kernelcache ships a newer Libm whose tables carry records the
++    # pools above do not cover. Each row pins 32 bytes of table data holding a
++    # word that decodes as an out-of-range PC-relative reference (sagit, iOS
++    # 16.7.16); the digest matches the bytes exactly, so real code never does.
++    ('485f9df0a754003d000000c746f209bf', 32, '9f80db512a75f52d45f543d3797505a4681d4b056df7b278a722a31ecec940e5'),
++    ('485f9df0a754003d000000c746f209bf', 32, 'b7ea061e72f3f006c32149fad5800257879258fea4f81f311a6855227d722ef6'),
++    ('485f9df0a754003d000000e4e436e83e', 32, '5b15b3028bdd8adb66b2443e53b178505f556dfdf20a152c1be7744968a80f0b'),
++    ('485f9df0a754003d0000006f6c24cfbe', 32, '98ab807f122d5bd22fef71debb6c988e19618826cf4917093d8a06ebcad576fc'),
++    ('1259567041c57ebb00000060adbe6bbd', 32, '2337c9036dab62fc2a388922cff050736c5745fb0e3099107c9797f323fa855e'),
++    ('1259567041c57ebb00000060adbe6bbd', 32, 'abb5fccfaf179aa84fd7f4114b53b957e9ceff1f720d15cc95c9a6aafc189690'),
++    ('1259567041c57ebb0000007f4a05413d', 32, '33ba144dfe14c93abba07abd835dfef14ac00d64ec4959b17fb614b5eacc0336'),
++    ('b54eb2b70000007e449695b938de6133', 32, '50975510801ea7597f7be3fa8ad15af3b699ac9e73ab8fcf085509cf91b47cf2'),
++    ('b54eb2b70000000377d3843990433c99', 32, 'b2dbdbfc32c2f59e1c433eb2868d694c444dc6170a9e06ecabfd6693383de826'),
++    ('130c549603bc20c05b3a9eb49af02ec0', 32, '95b03ae34b5d322050846deeaf6706b6f9c0903bfdb6970f25f97ea1a7a812b1'),
++    ('5b3a9eb49af02ec0378c6cde5a6f2dc0', 32, 'e3f42bac3ac9861098b82529e3a811bfce45407916deb354698703f4f6bb78f4'),
++    ('2c34999489bc243fd521974e369c4d3f', 32, '7164aa9095842f2d3b5d771e5410c8cc8cc9c34b5d8baeace4d812e6072b6d1b'),
++    ('5573cc375504b6baa2aa2a3ded4f3636', 32, 'fbd396e5de3729dfdbcca0640820fb86d5ed385f9ae328c8d8beeb4d32555513'),
++    ('ed4f3636de0750b98588083c8931ad31', 32, '40e01a2342afad1202da6cc9ad8bf5fd4e27be9489a95487eb1c4a113839c899'),
++    ('dbc0dd34f5d1a73a00000075c29f623c', 32, '5038da54d2e109efc52007e7a29af840f2fa0f15137f8bbedd3aa6e9e99ea32a'),
++    ('29b60ddc4d53ef390000007041c57ebb', 32, 'b17c16c092c161937cbb634d6386caae9d17d7755ff6d05a5d956212a56f35b9'),
++    ('de6133b54e923fb800000091650537ba', 32, '172e0e9b37f21811c59ca4fc0ff13d150d6a7ebbe8f13cdd8f71e99524f01eca'),
++    ('de6133b54e923fb8000000de34f5213a', 32, '8b0997a62f992634844733feeadbe7d2ee018a8fc0d485f8fb09a63c7fe8c36e'),
++    ('de6133b54e923fb8000000dc4d53ef39', 32, '918a5648673a82a390ef4d9e4223b4c59841c6b5e65b0f5840d8907c3be62b97'),
++    ('526cdb37000000dc4d53ef39728827b3', 32, 'd3cfef8150aa89d029e5304ab15d56848648366910838a1e670a33d3b4911ecb'),
++    ('526cdb370000007e449695b938de6133', 32, 'c0fccbb25e613c36f19c169e478d2cf1ba7d16cebe76b1f782b2ee568bd88408'),
++    ('a97582b783c8c96d305fe43f3f71f8e4', 32, '2782cf1beea5a8af1a58a4ce429c420f522c4d4e656306bc5b1e117fe5029a88'),
+ )
+ COALESCED = {'__PRELINK_TEXT': '__TEXT', '__PLK_TEXT_EXEC': '__TEXT_EXEC',
+              '__PLK_DATA_CONST': '__DATA_CONST', '__PRELINK_DATA': '__DATA'}
+@@ -180,28 +206,61 @@ def emit(native_data, original_data, roots, slide, early_security_init=None):
+ 
+     # Keep coalesced geometry, but only copy selected component segments.
+     # Packed kernel-resource records are copied as original readonly metadata.
++    # The unselected components of the original cache are zero fill; the file
++    # carries them because the coalesced segments were sized to the whole
++    # original range. Bound every segment to the occupied span instead: the
++    # component virtual addresses never move (relative instruction encodings
++    # must survive), but the segment wraps only the pages that hold content,
++    # plus readonly padding for the sparse header index where one is needed.
++    index_size = len(report['components']) * 8
+     for coalesced_name, component_name in COALESCED.items():
+         source = next(s for s in parent if s['name'] == coalesced_name)
+-        blob = bytearray(source['size'])
++        extents = []
+         for module in modules.values():
+             for segment in module['segments']:
+                 if segment['name'] != component_name or not segment['filesize']:
+                     continue
+                 begin = segment['va'] - source['va']
+-                if begin < 0 or begin + segment['size'] > len(blob):
++                if begin < 0 or begin + segment['size'] > source['size']:
+                     raise ValueError('Component is outside original coalesced range')
++                extents.append((begin, begin + segment['filesize']))
++        if coalesced_name == '__PRELINK_TEXT':
++            for identifier in report['kernel_interfaces']:
++                entry = entries[identifier]
++                va, length = entry['_PrelinkExecutableLoadAddr'], entry['_PrelinkExecutableSize']
++                begin = va - source['va']
++                if begin < 0 or begin + length > source['size']:
++                    raise ValueError('Kernel interface outside readonly prelink range')
++                extents.append((begin, begin + length))
++        if not extents:
++            raise ValueError(f'No selected content in {coalesced_name}')
++        low = max(0, min(begin for begin, _ in extents) & ~4095)
++        high = max(end for _, end in extents)
++        if coalesced_name == '__PRELINK_TEXT':
++            high = (high + index_size + 4095) & ~4095
++        else:
++            high = (high + 4095) & ~4095
++        span = high - low
++        blob = bytearray(span)
++        for module in modules.values():
++            for segment in module['segments']:
++                if segment['name'] != component_name or not segment['filesize']:
++                    continue
++                begin = segment['va'] - source['va'] - low
++                if begin < 0 or begin + segment['size'] > span:
++                    raise ValueError('Component is outside the occupied coalesced span')
+                 fileoff = backed_offset(parent, segment['va'], segment['filesize'], len(original_data))
+                 blob[begin:begin + segment['filesize']] = original_data[fileoff:fileoff + segment['filesize']]
+         if coalesced_name == '__PRELINK_TEXT':
+             for identifier in report['kernel_interfaces']:
+                 entry = entries[identifier]
+                 va, length = entry['_PrelinkExecutableLoadAddr'], entry['_PrelinkExecutableSize']
+-                begin = va - source['va']
++                begin = va - source['va'] - low
+                 at = backed_offset(parent, va, length, len(original_data))
+-                if begin < 0 or begin + length > len(blob):
+-                    raise ValueError('Kernel interface outside readonly prelink range')
++                if begin < 0 or begin + length > span:
++                    raise ValueError('Kernel interface outside the occupied coalesced span')
+                 blob[begin:begin + length] = original_data[at:at + length]
+-        append_segment(coalesced_name, source['va'] + slide, blob, source['size'], source['initprot'])
++        append_segment(coalesced_name, source['va'] + low + slide, blob, span, source['initprot'])
+ 
+     def new_offset(address, length):
+         return backed_offset(new_segments, address, length, len(output))
