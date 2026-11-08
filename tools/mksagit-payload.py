@@ -55,7 +55,8 @@ def sha256(path):
 
 
 LZMA_PAYLOAD_MAGIC = b'UNXLZMA1'
-LZMA_PAYLOAD_HEADER = struct.Struct('<IIQQII32x')
+# Mirrors the firmware's LZMA_PAYLOAD_HEADER: magic inside, packed to 72 bytes.
+LZMA_PAYLOAD_HEADER = struct.Struct('<QIIQQII32x')
 
 
 def compress_payload(volume_path, output_path):
@@ -73,10 +74,18 @@ def compress_payload(volume_path, output_path):
                                                 'lc': 3, 'lp': 0, 'pb': 2,
                                                 'mode': lzma.MODE_NORMAL,
                                                 'nice_len': 64, 'mf': lzma.MF_BT4}]))
-    header = LZMA_PAYLOAD_MAGIC + LZMA_PAYLOAD_HEADER.pack(
-        1, LZMA_PAYLOAD_HEADER.size, len(encoded), len(raw),
-        zlib.crc32(bytes(encoded)) & 0xffffffff, zlib.crc32(raw) & 0xffffffff)
-    output_path.write_bytes(header + bytes(encoded))
+    # Normalize the stream for EDK2's decoder: some Python builds prefix the
+    # alone header with padding and write an unknown-size field (ff..ff),
+    # while LzmaUefiDecompressGetInfo requires the exact decoded size.
+    props = bytes(encoded).find(b'\x5d\x00\x00\x80\x00')
+    if props < 0:
+        raise SystemExit('LZMA-alone header not found in the encoded stream')
+    stream = bytes(encoded[props:props + 5]) + struct.pack('<Q', len(raw)) + bytes(encoded[props + 5:])
+    header = LZMA_PAYLOAD_HEADER.pack(
+        int.from_bytes(LZMA_PAYLOAD_MAGIC, 'little'),
+        1, LZMA_PAYLOAD_HEADER.size, len(stream), len(raw),
+        zlib.crc32(stream) & 0xffffffff, zlib.crc32(raw) & 0xffffffff)
+    output_path.write_bytes(header + stream)
     return output_path
 
 
