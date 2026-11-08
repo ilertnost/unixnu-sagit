@@ -24,6 +24,9 @@ differ -- that is the ADT's business, not the volume's.
 import argparse
 import hashlib
 import json
+import lzma
+import struct
+import zlib
 import os
 import shutil
 import subprocess
@@ -49,6 +52,32 @@ def sha256(path):
         for block in iter(lambda: handle.read(1 << 20), b''):
             digest.update(block)
     return digest.hexdigest()
+
+
+LZMA_PAYLOAD_MAGIC = b'UNXLZMA1'
+LZMA_PAYLOAD_HEADER = struct.Struct('<IIQQII32x')
+
+
+def compress_payload(volume_path, output_path):
+    """Wrap the FAT volume in a self-describing LZMA-alone stream.
+
+    The Mi 6 bootloader refuses boot images whose ramdisk section exceeds
+    roughly 36 MiB, so the volume travels compressed and UniXNURamDiskDxe
+    expands it before publishing the block device. The LZMA-alone container
+    carries the exact decoded size, which is what EDK2's decoder requires.
+    """
+    raw = volume_path.read_bytes()
+    encoded = bytearray(lzma.compress(raw, format=lzma.FORMAT_ALONE,
+                                      filters=[{'id': lzma.FILTER_LZMA1,
+                                                'dict_size': 8 << 20,
+                                                'lc': 3, 'lp': 0, 'pb': 2,
+                                                'mode': lzma.MODE_NORMAL,
+                                                'nice_len': 64, 'mf': lzma.MF_BT4}]))
+    header = LZMA_PAYLOAD_MAGIC + LZMA_PAYLOAD_HEADER.pack(
+        1, LZMA_PAYLOAD_HEADER.size, len(encoded), len(raw),
+        zlib.crc32(bytes(encoded)) & 0xffffffff, zlib.crc32(raw) & 0xffffffff)
+    output_path.write_bytes(header + bytes(encoded))
+    return output_path
 
 
 def configuration(title, kernel_args, has_adt, timeout=15):
@@ -151,11 +180,21 @@ def main():
     parser.add_argument('--title', default='Adrenoline', help='menu entry title')
     parser.add_argument('--args', default='-v', help='XNU boot arguments')
     parser.add_argument('--timeout', type=int, default=15, help='menu timeout in seconds (default 15)')
+    parser.add_argument('--lzma', action='store_true',
+                        help='wrap the volume in an LZMA-alone stream for the firmware to expand')
     arguments = parser.parse_args()
 
     report = build(arguments.kernel, arguments.adt, arguments.output,
                    arguments.size_mib, arguments.title, arguments.args,
                    arguments.timeout)
+    if arguments.lzma:
+        compressed = arguments.output.with_suffix('.img.lzma')
+        compress_payload(arguments.output, compressed)
+        report['lzma_bytes'] = compressed.stat().st_size
+        report['lzma_sha256'] = sha256(compressed)
+        print('lzma payload: %s (%d bytes, %d%% of the volume)'
+              % (compressed, report['lzma_bytes'],
+                 report['lzma_bytes'] * 100 // max(report['payload_bytes'], 1)))
     print('payload: %s (%d bytes, %d files)'
           % (arguments.output, report['payload_bytes'], len(report['files'])))
     for line in report['files']:

@@ -1,0 +1,199 @@
+diff --git a/package/UniXNUPkg/Driver/UniXNURamDiskDxe/UniXNURamDiskDxe.c b/package/UniXNUPkg/Driver/UniXNURamDiskDxe/UniXNURamDiskDxe.c
+index 7d4def5..fbc7f11 100644
+--- a/package/UniXNUPkg/Driver/UniXNURamDiskDxe/UniXNURamDiskDxe.c
++++ b/package/UniXNUPkg/Driver/UniXNURamDiskDxe/UniXNURamDiskDxe.c
+@@ -10,6 +10,7 @@
+ #include <Library/DebugLib.h>
+ #include <Library/FdtLib.h>
+ #include <Library/HobLib.h>
++#include <Library/MemoryAllocationLib.h>
+ #include <Library/UefiBootServicesTableLib.h>
+ #include <Protocol/BlockIo.h>
+ #include <Protocol/DevicePath.h>
+@@ -50,6 +51,47 @@ STATIC RAM_BLOCK_DEVICE_PATH  mDevicePath = {
+   { END_DEVICE_PATH_TYPE, END_ENTIRE_DEVICE_PATH_SUBTYPE, { sizeof (EFI_DEVICE_PATH_PROTOCOL), 0 } }
+ };
+ 
++//
++// The payload volume may travel LZMA-compressed: a self-describing header
++// followed by an LZMA-alone stream that expands to the FAT volume the loader
++// reads. The Mi 6 bootloader refuses boot images whose ramdisk section
++// exceeds roughly 36 MiB, so the 40+ MiB volume of a prelinked kernel has to
++// travel packed and expand here, before the block device is published.
++//
++#define LZMA_PAYLOAD_MAGIC  SIGNATURE_64 ('U', 'N', 'X', 'L', 'Z', 'M', 'A', '1')
++
++#pragma pack(1)
++typedef struct {
++  UINT64    Magic;
++  UINT32    Version;
++  UINT32    HeaderSize;
++  UINT64    StoredSize;
++  UINT64    ExpandedSize;
++  UINT32    StreamCrc;
++  UINT32    RawCrc;
++  UINT8     Reserved[32];
++} LZMA_PAYLOAD_HEADER;
++#pragma pack()
++
++// Raw entry points of MdeModulePkg/Library/LzmaCustomDecompressLib.
++EFI_STATUS
++EFIAPI
++LzmaUefiDecompressGetInfo (
++  IN  CONST VOID  *Source,
++  IN  UINT32      SourceSize,
++  OUT UINT32      *DestinationSize,
++  OUT UINT32      *ScratchSize
++  );
++
++EFI_STATUS
++EFIAPI
++LzmaUefiDecompress (
++  IN  CONST VOID  *Source,
++  IN  UINTN       SourceSize,
++  IN  VOID        *Destination,
++  IN  VOID        *Scratch
++  );
++
+ STATIC UINT8                    *mRamBase;
+ STATIC EFI_BLOCK_IO_MEDIA       mMedia;
+ 
+@@ -128,6 +170,83 @@ STATIC EFI_BLOCK_IO_PROTOCOL  mBlockIo = {
+   RamBlockFlush
+ };
+ 
++//
++// Expand an LZMA-compressed payload into a freshly allocated buffer.
++// Returns NULL when the payload is not compressed or fails to expand; the
++// caller then publishes the raw bytes as before.
++//
++STATIC
++UINT8 *
++ExpandLzmaPayload (
++  IN  CONST VOID  *Payload,
++  IN  UINTN       PayloadSize,
++  OUT UINTN       *ExpandedSize
++  )
++{
++  CONST LZMA_PAYLOAD_HEADER  *Header;
++  CONST UINT8                *Stream;
++  UINTN                      StreamSize;
++  UINT32                     DestinationSize;
++  UINT32                     ScratchSize;
++  VOID                       *Scratch;
++  UINT8                      *Expanded;
++  UINT32                     Crc;
++  EFI_STATUS                 Status;
++
++  Header = (CONST LZMA_PAYLOAD_HEADER *)Payload;
++  if ((PayloadSize < sizeof (LZMA_PAYLOAD_HEADER)) ||
++      (Header->Magic != LZMA_PAYLOAD_MAGIC) ||
++      (Header->Version != 1) ||
++      (Header->HeaderSize != sizeof (LZMA_PAYLOAD_HEADER)) ||
++      (Header->StoredSize > PayloadSize - sizeof (LZMA_PAYLOAD_HEADER)) ||
++      (Header->ExpandedSize < RAM_BLOCK_SIZE) ||
++      ((Header->ExpandedSize % RAM_BLOCK_SIZE) != 0))
++  {
++    return NULL;
++  }
++
++  Stream      = (CONST UINT8 *)Payload + Header->HeaderSize;
++  StreamSize  = (UINTN)Header->StoredSize;
++  Status = LzmaUefiDecompressGetInfo (Stream, (UINT32)StreamSize, &DestinationSize, &ScratchSize);
++  if (EFI_ERROR (Status) || (DestinationSize != Header->ExpandedSize)) {
++    DEBUG ((DEBUG_ERROR, "UNIXNURAMDISK: LZMA info failed or size mismatch %r\n", Status));
++    return NULL;
++  }
++
++  Expanded = AllocatePages (EFI_SIZE_TO_PAGES (DestinationSize));
++  if (Expanded == NULL) {
++    DEBUG ((DEBUG_ERROR, "UNIXNURAMDISK: no room for the expanded payload\n"));
++    return NULL;
++  }
++
++  Scratch = AllocatePool (ScratchSize);
++  if (Scratch == NULL) {
++    FreePages (Expanded, EFI_SIZE_TO_PAGES (DestinationSize));
++    DEBUG ((DEBUG_ERROR, "UNIXNURAMDISK: no room for the LZMA scratch\n"));
++    return NULL;
++  }
++
++  Status = LzmaUefiDecompress (Stream, StreamSize, Expanded, Scratch);
++  FreePool (Scratch);
++  if (EFI_ERROR (Status)) {
++    FreePages (Expanded, EFI_SIZE_TO_PAGES (DestinationSize));
++    DEBUG ((DEBUG_ERROR, "UNIXNURAMDISK: LZMA decode failed %r\n", Status));
++    return NULL;
++  }
++
++  Crc = 0;
++  Status = gBS->CalculateCrc32 (Expanded, DestinationSize, &Crc);
++  if (EFI_ERROR (Status) || (Crc != Header->RawCrc)) {
++    FreePages (Expanded, EFI_SIZE_TO_PAGES (DestinationSize));
++    DEBUG ((DEBUG_ERROR, "UNIXNURAMDISK: expanded payload CRC mismatch\n"));
++    return NULL;
++  }
++
++  *ExpandedSize = DestinationSize;
++  DEBUG ((DEBUG_ERROR, "UNIXNURAMDISK: expanded %u bytes to %u bytes\n", (UINT32)PayloadSize, DestinationSize));
++  return Expanded;
++}
++
+ STATIC
+ VOID
+ PublishInitrd (
+@@ -142,6 +261,7 @@ PublishInitrd (
+   INT32       EndLength;
+   UINT64      Start;
+   UINT64      End;
++  UINTN       VolumeSize;
+   EFI_HANDLE  Handle;
+ 
+   Chosen = FdtPathOffset (Fdt, "/chosen");
+@@ -166,7 +286,12 @@ PublishInitrd (
+     return;
+   }
+ 
+-  mRamBase                = (UINT8 *)(UINTN)Start;
++  mRamBase  = ExpandLzmaPayload ((CONST VOID *)(UINTN)Start, (UINTN)(End - Start), &VolumeSize);
++  if (mRamBase == NULL) {
++    mRamBase   = (UINT8 *)(UINTN)Start;
++    VolumeSize = (UINTN)(End - Start);
++  }
++
+   mMedia.MediaId          = 1;
+   mMedia.RemovableMedia   = FALSE;
+   mMedia.MediaPresent     = TRUE;
+@@ -175,7 +300,7 @@ PublishInitrd (
+   mMedia.WriteCaching     = FALSE;
+   mMedia.BlockSize        = RAM_BLOCK_SIZE;
+   mMedia.IoAlign          = 1;
+-  mMedia.LastBlock        = (End - Start) / RAM_BLOCK_SIZE - 1;
++  mMedia.LastBlock        = VolumeSize / RAM_BLOCK_SIZE - 1;
+ 
+   Handle = NULL;
+   Status = gBS->InstallMultipleProtocolInterfaces (
+@@ -186,7 +311,7 @@ PublishInitrd (
+                   &mBlockIo,
+                   NULL
+                   );
+-  DEBUG ((DEBUG_ERROR, "UNIXNURAMDISK: initrd block device 0x%lx size 0x%lx %r\n", Start, End - Start, Status));
++  DEBUG ((DEBUG_ERROR, "UNIXNURAMDISK: initrd block device 0x%lx size 0x%lx %r\n", Start, (UINT64)VolumeSize, Status));
+ }
+ 
+ EFI_STATUS
+diff --git a/package/UniXNUPkg/Driver/UniXNURamDiskDxe/UniXNURamDiskDxe.inf b/package/UniXNUPkg/Driver/UniXNURamDiskDxe/UniXNURamDiskDxe.inf
+index f4dab2d..7bdf414 100644
+--- a/package/UniXNUPkg/Driver/UniXNURamDiskDxe/UniXNURamDiskDxe.inf
++++ b/package/UniXNUPkg/Driver/UniXNURamDiskDxe/UniXNURamDiskDxe.inf
+@@ -18,8 +18,10 @@
+   DebugLib
+   FdtLib
+   HobLib
++  MemoryAllocationLib
+   UefiBootServicesTableLib
+   UefiDriverEntryPoint
++  LzmaCustomDecompressLib
+ 
+ [Protocols]
+   gEfiBlockIoProtocolGuid                       ## PRODUCES

@@ -89,6 +89,12 @@ if ! grep -q "occupied coalesced span" "$SRC/kits/XnuPrelink/emit_prelink.py"; t
   git -C "$SRC/kits/XnuPrelink" apply "$PATCHES/0026-unixnu-prelink-span-shrink.patch"
 fi
 
+# The Mi 6 bootloader refuses boot images whose ramdisk section exceeds
+# roughly 36 MiB, so UniXNURamDiskDxe learns to expand an LZMA-alone payload.
+if ! grep -q "UNXLZMA1" "$SRC/package/UniXNUPkg/Driver/UniXNURamDiskDxe/UniXNURamDiskDxe.c"; then
+  git -C "$SRC" apply "$PATCHES/0027-unixnu-ramdisk-lzma.patch"
+fi
+
 # The device patch series (patches/xnu/series) carries the bring-up ladder
 # and the CPU-cluster fix. The resolver applies the full selected series —
 # arch, SoC, OS, then device, ladder last — on a fresh clone whenever the
