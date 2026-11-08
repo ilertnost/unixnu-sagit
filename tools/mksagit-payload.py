@@ -51,12 +51,12 @@ def sha256(path):
     return digest.hexdigest()
 
 
-def configuration(title, kernel_args, has_adt):
+def configuration(title, kernel_args, has_adt, timeout=15):
     lines = [
         'version = 1',
         '',
         '[boot]',
-        'timeout = 3',
+        'timeout = %u' % timeout,
         'default = "xnu"',
         '',
         '[kits]',
@@ -89,7 +89,7 @@ def configuration(title, kernel_args, has_adt):
     return '\n'.join(lines) + '\n'
 
 
-def build(kernel, adt, output, size_mib, title, kernel_args):
+def build(kernel, adt, output, size_mib, title, kernel_args, timeout=15):
     for path, what in ((kernel, 'kernel'), (adt, 'ADT')):
         if not path.is_file():
             raise SystemExit('%s not found: %s' % (what, path))
@@ -102,7 +102,7 @@ def build(kernel, adt, output, size_mib, title, kernel_args):
 
         shutil.copyfile(kernel, payloads / 'kernel.macho')
         shutil.copyfile(adt, payloads / 'kernel.macho.adt')
-        (stage / 'EFI/UniXNU/unixnu.toml').write_text(configuration(title, kernel_args, True))
+        (stage / 'EFI/UniXNU/unixnu.toml').write_text(configuration(title, kernel_args, True, timeout))
 
         for path in [stage, *sorted(stage.rglob('*'))]:
             os.utime(path, (EPOCH, EPOCH))
@@ -150,10 +150,12 @@ def main():
     parser.add_argument('--size-mib', type=int, default=24, help='volume size in MiB (default 24)')
     parser.add_argument('--title', default='Adrenoline', help='menu entry title')
     parser.add_argument('--args', default='-v', help='XNU boot arguments')
+    parser.add_argument('--timeout', type=int, default=15, help='menu timeout in seconds (default 15)')
     arguments = parser.parse_args()
 
     report = build(arguments.kernel, arguments.adt, arguments.output,
-                   arguments.size_mib, arguments.title, arguments.args)
+                   arguments.size_mib, arguments.title, arguments.args,
+                   arguments.timeout)
     print('payload: %s (%d bytes, %d files)'
           % (arguments.output, report['payload_bytes'], len(report['files'])))
     for line in report['files']:
