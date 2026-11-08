@@ -85,7 +85,12 @@ def compress_payload(volume_path, output_path):
         int.from_bytes(LZMA_PAYLOAD_MAGIC, 'little'),
         1, LZMA_PAYLOAD_HEADER.size, len(stream), len(raw),
         zlib.crc32(stream) & 0xffffffff, zlib.crc32(raw) & 0xffffffff)
-    output_path.write_bytes(header + stream)
+    blob = header + stream
+    # The bootloader hands the ramdisk over by the header-declared size and
+    # the firmware sanity-checks nothing about it, but a whole-file sector
+    # multiple keeps every consumer honest.
+    blob += bytes(-len(blob) % 2048)
+    output_path.write_bytes(blob)
     return output_path
 
 

@@ -1,16 +1,17 @@
 diff --git a/package/UniXNUPkg/Driver/UniXNURamDiskDxe/UniXNURamDiskDxe.c b/package/UniXNUPkg/Driver/UniXNURamDiskDxe/UniXNURamDiskDxe.c
-index 7d4def5..fbc7f11 100644
+index 7d4def5..41b4c1f 100644
 --- a/package/UniXNUPkg/Driver/UniXNURamDiskDxe/UniXNURamDiskDxe.c
 +++ b/package/UniXNUPkg/Driver/UniXNURamDiskDxe/UniXNURamDiskDxe.c
-@@ -10,6 +10,7 @@
+@@ -10,6 +10,8 @@
  #include <Library/DebugLib.h>
  #include <Library/FdtLib.h>
  #include <Library/HobLib.h>
 +#include <Library/MemoryAllocationLib.h>
++#include <Library/UefiRuntimeServicesTableLib.h>
  #include <Library/UefiBootServicesTableLib.h>
  #include <Protocol/BlockIo.h>
  #include <Protocol/DevicePath.h>
-@@ -50,6 +51,47 @@ STATIC RAM_BLOCK_DEVICE_PATH  mDevicePath = {
+@@ -50,9 +52,76 @@ STATIC RAM_BLOCK_DEVICE_PATH  mDevicePath = {
    { END_DEVICE_PATH_TYPE, END_ENTIRE_DEVICE_PATH_SUBTYPE, { sizeof (EFI_DEVICE_PATH_PROTOCOL), 0 } }
  };
  
@@ -58,7 +59,36 @@ index 7d4def5..fbc7f11 100644
  STATIC UINT8                    *mRamBase;
  STATIC EFI_BLOCK_IO_MEDIA       mMedia;
  
-@@ -128,6 +170,83 @@ STATIC EFI_BLOCK_IO_PROTOCOL  mBlockIo = {
++//
++// The device ReportDxe prints this variable on the screen; without a serial
++// console it is the only way to see why a payload was refused.
++//
++STATIC CONST EFI_GUID  mStatusGuid = {
++  0xC0A1F5D4, 0x7E3B, 0x4C21,
++  { 0x8F, 0x62, 0x1A, 0x55, 0x9D, 0x3E, 0x70, 0x11 }
++};
++
++STATIC CHAR16  mStatusName[] = L"SagitRamDisk";
++
++STATIC
++VOID
++SetDiag (
++  IN CONST CHAR8  *Message
++  )
++{
++  gRT->SetVariable (
++         mStatusName,
++         (EFI_GUID *)&mStatusGuid,
++         EFI_VARIABLE_BOOTSERVICE_ACCESS,
++         AsciiStrSize (Message),
++         (VOID *)Message
++         );
++}
++
+ STATIC
+ EFI_STATUS
+ EFIAPI
+@@ -128,6 +197,90 @@ STATIC EFI_BLOCK_IO_PROTOCOL  mBlockIo = {
    RamBlockFlush
  };
  
@@ -94,6 +124,7 @@ index 7d4def5..fbc7f11 100644
 +      (Header->ExpandedSize < RAM_BLOCK_SIZE) ||
 +      ((Header->ExpandedSize % RAM_BLOCK_SIZE) != 0))
 +  {
++    SetDiag ("lzma: header invalid");
 +    return NULL;
 +  }
 +
@@ -102,12 +133,14 @@ index 7d4def5..fbc7f11 100644
 +  Status = LzmaUefiDecompressGetInfo (Stream, (UINT32)StreamSize, &DestinationSize, &ScratchSize);
 +  if (EFI_ERROR (Status) || (DestinationSize != Header->ExpandedSize)) {
 +    DEBUG ((DEBUG_ERROR, "UNIXNURAMDISK: LZMA info failed or size mismatch %r\n", Status));
++    SetDiag ("lzma: info failed or size mismatch");
 +    return NULL;
 +  }
 +
 +  Expanded = AllocatePages (EFI_SIZE_TO_PAGES (DestinationSize));
 +  if (Expanded == NULL) {
 +    DEBUG ((DEBUG_ERROR, "UNIXNURAMDISK: no room for the expanded payload\n"));
++    SetDiag ("lzma: no room for the expanded payload");
 +    return NULL;
 +  }
 +
@@ -115,6 +148,7 @@ index 7d4def5..fbc7f11 100644
 +  if (Scratch == NULL) {
 +    FreePages (Expanded, EFI_SIZE_TO_PAGES (DestinationSize));
 +    DEBUG ((DEBUG_ERROR, "UNIXNURAMDISK: no room for the LZMA scratch\n"));
++    SetDiag ("lzma: no room for the scratch");
 +    return NULL;
 +  }
 +
@@ -123,6 +157,7 @@ index 7d4def5..fbc7f11 100644
 +  if (EFI_ERROR (Status)) {
 +    FreePages (Expanded, EFI_SIZE_TO_PAGES (DestinationSize));
 +    DEBUG ((DEBUG_ERROR, "UNIXNURAMDISK: LZMA decode failed %r\n", Status));
++    SetDiag ("lzma: decode failed");
 +    return NULL;
 +  }
 +
@@ -131,18 +166,20 @@ index 7d4def5..fbc7f11 100644
 +  if (EFI_ERROR (Status) || (Crc != Header->RawCrc)) {
 +    FreePages (Expanded, EFI_SIZE_TO_PAGES (DestinationSize));
 +    DEBUG ((DEBUG_ERROR, "UNIXNURAMDISK: expanded payload CRC mismatch\n"));
++    SetDiag ("lzma: expanded payload CRC mismatch");
 +    return NULL;
 +  }
 +
 +  *ExpandedSize = DestinationSize;
 +  DEBUG ((DEBUG_ERROR, "UNIXNURAMDISK: expanded %u bytes to %u bytes\n", (UINT32)PayloadSize, DestinationSize));
++  SetDiag ("lzma ok");
 +  return Expanded;
 +}
 +
  STATIC
  VOID
  PublishInitrd (
-@@ -142,6 +261,7 @@ PublishInitrd (
+@@ -142,11 +295,13 @@ PublishInitrd (
    INT32       EndLength;
    UINT64      Start;
    UINT64      End;
@@ -150,21 +187,52 @@ index 7d4def5..fbc7f11 100644
    EFI_HANDLE  Handle;
  
    Chosen = FdtPathOffset (Fdt, "/chosen");
-@@ -166,7 +286,12 @@ PublishInitrd (
+   if (Chosen < 0) {
+     DEBUG ((DEBUG_ERROR, "UNIXNURAMDISK: no /chosen\n"));
++    SetDiag ("no /chosen in the handoff tree");
+     return;
+   }
+ 
+@@ -156,17 +311,35 @@ PublishInitrd (
+       ((StartLength != 4) && (StartLength != 8)) || ((EndLength != 4) && (EndLength != 8)))
+   {
+     DEBUG ((DEBUG_ERROR, "UNIXNURAMDISK: no initrd in /chosen\n"));
++    SetDiag ("no initrd in /chosen");
+     return;
+   }
+ 
+   Start = ReadCells (StartProp, StartLength / 4);
+   End   = ReadCells (EndProp, EndLength / 4);
+-  if ((End <= Start) || (((End - Start) % RAM_BLOCK_SIZE) != 0)) {
+-    DEBUG ((DEBUG_ERROR, "UNIXNURAMDISK: initrd 0x%lx-0x%lx is not a whole number of sectors\n", Start, End));
++  if (End <= Start) {
++    DEBUG ((DEBUG_ERROR, "UNIXNURAMDISK: empty initrd 0x%lx-0x%lx\n", Start, End));
++    SetDiag ("empty initrd range");
      return;
    }
  
 -  mRamBase                = (UINT8 *)(UINTN)Start;
-+  mRamBase  = ExpandLzmaPayload ((CONST VOID *)(UINTN)Start, (UINTN)(End - Start), &VolumeSize);
++  //
++  // A compressed payload is tried first and needs no sector alignment;
++  // a raw volume must be a whole number of sectors.
++  //
++  mRamBase = ExpandLzmaPayload ((CONST VOID *)(UINTN)Start, (UINTN)(End - Start), &VolumeSize);
 +  if (mRamBase == NULL) {
++    if (((End - Start) % RAM_BLOCK_SIZE) != 0) {
++      DEBUG ((DEBUG_ERROR, "UNIXNURAMDISK: initrd 0x%lx-0x%lx is not a whole number of sectors\n", Start, End));
++      SetDiag ("raw payload is not sector aligned");
++      return;
++    }
++
 +    mRamBase   = (UINT8 *)(UINTN)Start;
 +    VolumeSize = (UINTN)(End - Start);
++    SetDiag ("raw ok");
 +  }
 +
    mMedia.MediaId          = 1;
    mMedia.RemovableMedia   = FALSE;
    mMedia.MediaPresent     = TRUE;
-@@ -175,7 +300,7 @@ PublishInitrd (
+@@ -175,7 +348,7 @@ PublishInitrd (
    mMedia.WriteCaching     = FALSE;
    mMedia.BlockSize        = RAM_BLOCK_SIZE;
    mMedia.IoAlign          = 1;
@@ -173,7 +241,7 @@ index 7d4def5..fbc7f11 100644
  
    Handle = NULL;
    Status = gBS->InstallMultipleProtocolInterfaces (
-@@ -186,7 +311,7 @@ PublishInitrd (
+@@ -186,7 +359,7 @@ PublishInitrd (
                    &mBlockIo,
                    NULL
                    );
@@ -182,6 +250,22 @@ index 7d4def5..fbc7f11 100644
  }
  
  EFI_STATUS
+@@ -202,6 +375,7 @@ UniXNURamDiskDxeEntry (
+   Hob = GetFirstGuidHob (&mEntryArgHobGuid);
+   if (Hob == NULL) {
+     DEBUG ((DEBUG_ERROR, "UNIXNURAMDISK: no entry argument HOB\n"));
++    SetDiag ("no entry argument HOB");
+     return EFI_SUCCESS;
+   }
+ 
+@@ -212,6 +386,7 @@ UniXNURamDiskDxeEntry (
+   Dtb = ReadUnaligned64 ((CONST UINT64 *)GET_GUID_HOB_DATA (Hob));
+   if ((Dtb == 0) || ((Dtb & 3) != 0) || (FdtCheckHeader ((VOID *)(UINTN)Dtb) != 0)) {
+     DEBUG ((DEBUG_ERROR, "UNIXNURAMDISK: x0 0x%lx is not a device tree\n", Dtb));
++    SetDiag ("x0 is not a device tree");
+     return EFI_SUCCESS;
+   }
+ 
 diff --git a/package/UniXNUPkg/Driver/UniXNURamDiskDxe/UniXNURamDiskDxe.inf b/package/UniXNUPkg/Driver/UniXNURamDiskDxe/UniXNURamDiskDxe.inf
 index f4dab2d..7bdf414 100644
 --- a/package/UniXNUPkg/Driver/UniXNURamDiskDxe/UniXNURamDiskDxe.inf
