@@ -162,7 +162,7 @@ index 7187c15..9196539 100644
  	machine_startup(args);
  }
  
-index a688021..52efd20 100644
+index a688021..a5eaab5 100644
 --- a/osfmk/arm64/arm_vm_init.c
 +++ b/osfmk/arm64/arm_vm_init.c
 @@ -128,6 +128,279 @@ SECURITY_READ_ONLY_LATE(unsigned long) gPhysSize;
@@ -680,7 +680,7 @@ index a688021..52efd20 100644
  #if KASAN && !defined(ARM_LARGE_MEMORY)
  	/* add the KASAN stolen memory to the physmap */
  	dynamic_memory_begin = static_memory_end + (shadow_ptop - shadow_pbase);
-@@ -1955,6 +2422,24 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -1955,6 +2422,32 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	invalid_ttep = kvtophys((vm_offset_t)invalid_tte);
  	bzero(invalid_tte, ARM_PGBYTES);
  
@@ -692,20 +692,28 @@ index a688021..52efd20 100644
 +	 * map replaces TTBR0 -- the same contract the SDM835 bring-up keeps
 +	 * for its debug UART console.
 +	 */
-+	if (sagit_ladder_fb != 0) {
++	if ((sagit_ladder_fb != 0) && (sagit_ladder_bytes != 0)) {
 +		tt_entry_t *fb_l2 = (tt_entry_t *)alloc_ptpage(TRUE);
++		vm_offset_t block = sagit_ladder_fb & ~((vm_offset_t)ARM_TT_L2_OFFMASK);
++		vm_offset_t fb_end = sagit_ladder_fb + sagit_ladder_bytes;
 +
 +		invalid_tte[L1_TABLE_INDEX(sagit_ladder_fb)] =
 +		    kvtophys((vm_offset_t)fb_l2) | ARM_TTE_BOOT_TABLE;
-+		fb_l2[L2_TABLE_INDEX(sagit_ladder_fb)] =
-+		    (sagit_ladder_fb & ~((vm_offset_t)ARM_TT_L2_OFFMASK)) |
-+		    ARM_TTE_BOOT_BLOCK;
++		//
++		// The framebuffer is ~8 MiB: every 2 MiB block it spans needs an
++		// entry, or the first paint past the first block faults (the bar
++		// at checkpoint 30 sits 3 MiB in, and died exactly there).
++		//
++		while (block < fb_end) {
++			fb_l2[L2_TABLE_INDEX(block)] = block | ARM_TTE_BOOT_BLOCK;
++			block += ~((vm_offset_t)ARM_TT_L2_OFFMASK) + 1;
++		}
 +	}
 +
  	/*
  	 * Initialize l1 page table page
  	 */
-@@ -1970,6 +2455,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -1970,6 +2463,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	real_avail_end = avail_end;
  #endif
  
@@ -714,7 +722,7 @@ index a688021..52efd20 100644
  	/*
  	 * Initialize l1 and l2 page table pages :
  	 *   map physical memory at the kernel base virtual address
-@@ -1989,6 +2476,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -1989,6 +2484,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  #endif
  
  
@@ -723,7 +731,7 @@ index a688021..52efd20 100644
  #if __ARM_KERNEL_PROTECT__
  	/* Expand the page tables to prepare for the EL0 mappings. */
  	arm_vm_expand_kernel_el0_mappings();
-@@ -2068,6 +2557,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -2068,6 +2565,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	}
  
  	(void) PE_parse_boot_argn("use_contiguous_hint", &use_contiguous_hint, sizeof(use_contiguous_hint));
@@ -732,7 +740,7 @@ index a688021..52efd20 100644
  	assert(segSizePRELINKTEXT < 0x03000000); /* 23355738 */
  
  	/* if one of the new segments is present, the other one better be as well */
-@@ -2103,6 +2594,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -2103,6 +2602,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  
  	arm_vm_prot_init(args);
  
@@ -741,7 +749,7 @@ index a688021..52efd20 100644
  	/*
  	 * Initialize the page tables for the low globals:
  	 *   cover this address range:
-@@ -2115,6 +2608,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -2115,6 +2616,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	*cpu_l2_tte = (kvtophys(ptpage_vaddr) & ARM_TTE_TABLE_MASK) | ARM_TTE_TYPE_TABLE | ARM_TTE_VALID | ARM_TTE_TABLE_PXN | ARM_TTE_TABLE_XN;
  	bzero((void *)ptpage_vaddr, ARM_PGBYTES);
  
@@ -750,7 +758,7 @@ index a688021..52efd20 100644
  	/*
  	 * Initialize l2 page table pages :
  	 *   cover this address range:
-@@ -2134,6 +2629,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -2134,6 +2637,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	init_ptpages(cpu_tte, dynamic_memory_begin, VM_MAX_KERNEL_ADDRESS, TRUE, ARM_DYNAMIC_TABLE_XN | ARM_TTE_TABLE_AP(ARM_TTE_TABLE_AP_USER_NA));
  #endif
  
@@ -759,7 +767,7 @@ index a688021..52efd20 100644
  #if KASAN
  	/* record the extent of the physmap */
  	physmap_vbase = physmap_base;
-@@ -2145,22 +2642,36 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -2145,22 +2650,36 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	mt_early_init();
  #endif /* CONFIG_CPU_COUNTERS */
  
@@ -796,7 +804,7 @@ index a688021..52efd20 100644
  
  	// From here on out, we're off the bootstrap translation tables.
  
-@@ -2255,6 +2766,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -2255,6 +2774,8 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  #endif
  	pmap_bootstrap(dynamic_memory_begin);
  
@@ -805,7 +813,7 @@ index a688021..52efd20 100644
  	disable_preemption();
  
  	/*
-@@ -2378,6 +2891,7 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+@@ -2378,6 +2899,7 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
  	pmap_static_allocations_done();
  #endif
  	first_avail = avail_start;
@@ -813,7 +821,7 @@ index a688021..52efd20 100644
  	patch_low_glo_static_region(args->topOfKernelData, avail_start - args->topOfKernelData);
  	enable_preemption();
  }
-@@ -2399,3 +2913,112 @@ kernel_text_contains(vm_offset_t addr)
+@@ -2399,3 +2921,112 @@ kernel_text_contains(vm_offset_t addr)
  	}
  	return segDATACONSTB <= addr && addr < (segDATACONSTB + segSizeDATACONST);
  }
