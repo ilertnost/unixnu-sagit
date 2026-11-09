@@ -77,10 +77,15 @@ def compress_payload(volume_path, output_path):
     # Normalize the stream for EDK2's decoder: some Python builds prefix the
     # alone header with padding and write an unknown-size field (ff..ff),
     # while LzmaUefiDecompressGetInfo requires the exact decoded size.
+    # The alone size field is eight bytes right after the five-byte props;
+    # keep the props, replace that field, and drop the original one. Leaving
+    # it in shifts the range-coded data by eight bytes and LzmaDecode rejects
+    # the stream as corrupt.
     props = bytes(encoded).find(b'\x5d\x00\x00\x80\x00')
     if props < 0:
         raise SystemExit('LZMA-alone header not found in the encoded stream')
-    stream = bytes(encoded[props:props + 5]) + struct.pack('<Q', len(raw)) + bytes(encoded[props + 5:])
+    stream = (bytes(encoded[props:props + 5]) + struct.pack('<Q', len(raw)) +
+              bytes(encoded[props + 13:]))
     header = LZMA_PAYLOAD_HEADER.pack(
         int.from_bytes(LZMA_PAYLOAD_MAGIC, 'little'),
         1, LZMA_PAYLOAD_HEADER.size, len(stream), len(raw),

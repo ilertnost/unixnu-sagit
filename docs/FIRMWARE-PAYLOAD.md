@@ -98,6 +98,25 @@ Without `PAYLOAD` the image boots to the UniXNU menu with nothing in it, which
 is still a useful test: it proves the boot manager and the loader are in the
 firmware and running.
 
+### When the volume has to travel compressed
+
+The prelinked iOS 16 kernel pushes the FAT volume past what ABL accepts for
+the ramdisk. `--lzma` wraps the finished volume in a 72-byte `UNXLZMA1`
+header and an LZMA-alone stream; `UniXNURamDiskDxe` expands it before
+publishing the block device.
+
+An LZMA-alone header is five property bytes followed by one eight-byte
+uncompressed size. Python writes `ff..ff` there when it does not know the
+size; the packer replaces that field with the exact length **and drops the
+original**, so the range-coded data starts immediately after the single size
+field. Keeping both fields shifts the decoder input by eight bytes, and
+`LzmaDecode` returns `SZ_ERROR_DATA`, which the driver reports as
+`lzma: decode failed`.
+
+The stock 64 KiB scratch is enough for these streams: the one-shot
+`LzmaDecode` uses the destination buffer as the dictionary and allocates only
+the probability array from scratch.
+
 ## Budget
 
 The `boot` partition is 64 MiB (`BOARD_BOOTIMAGE_PARTITION_SIZE` in the
