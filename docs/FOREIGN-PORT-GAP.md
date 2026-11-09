@@ -140,8 +140,8 @@ produced:
 
 ```
 mach.development.bcm2837.unstripped.noctf
-  17,823,632 bytes
-  sha256 dd233ff6bdb9a6bdccf4376e0f0e63287745cd6684c6724345eb30c84757e101
+  17,492,984 bytes
+  sha256 565c9d32b6a236c50230efb3c2b1ace7004c4ab4df80d13b291423ede6266abc
   Mach-O 64-bit arm64, NOUNDEFS|PIE, minos 16.0 (sdk 16.0)
   __TEXT at 0xfffffff007004000
 ```
@@ -149,8 +149,10 @@ mach.development.bcm2837.unstripped.noctf
 Prelinked and repacked for the boot image:
 
 ```
-kernel.stripped.macho   39,837,696 bytes
-sha256 eab3f026eb7d0c462e3b103044a0e8ae9ca3b758cde9e8c0fc680dec54744aa7
+kernel.macho           45,985,792 bytes
+sha256 7d7ac41f3e3257303a014c91734177fc3ea205a37cbb20b9e3b690ee9358df28
+kernel.stripped.macho  39,559,168 bytes
+sha256 93d8a917940d70f7a87326292efdbc37b0eb69b59f9fa29ad30da013001711ef
 ```
 
 The prelink selects 18 components (not the 222 passengers carried in the
@@ -614,14 +616,23 @@ then KeyStore. Do not add all 11 at once.
 
 ### P0 — flash the current fix and learn the next wall
 
-1. Flash `Mu-sagit.img` (sha256 `dbba476744dea098b59b12c255e8a02f5a6eda0a686d5abcb051743cfe18939e`).
-2. Verify the panic screen is single-spaced and the `IODTGetICellCounts`
-   panic is gone.
+1. Flash `Mu-sagit.img` (sha256 `b6d06dc8520f6203570663d7212ce55a31624ed274ec3d6890bc7ab485962aae`).
+2. Verify the panic screen is single-spaced, the `IODTGetICellCounts` panic
+   is gone, and `prng_random.c:267 assert(!prng_ready)` is gone.
 3. Capture the next panic/first failure. Likely candidates: PMGR/AMFI (if the
    security path is reached), CPU topology, or the mockfs/PID 1 transition.
 4. Do not change the CPU count or memory window in the same flash.
 
 Acceptance: a readable screen and a new first-failure line.
+
+The PRNG panic was a second corecrypto startup, not a random-source failure.
+The 20H392 cache's original `com.apple.kec.corecrypto` (module v13.0) starts
+through OSKext and registers the kernel PRNG once. The source corecrypto14
+provider (module v14.0) was also started by
+`source-corecrypto14-bootstrap`, so its `register_and_init_prng()` hit
+`assert(!prng_ready)`. `CONFIG_XNU_CRYPTO_BOOTSTRAP="prelinked"` omits only
+that source-provider startup entry; the source archive remains linked and no
+POST or missing-provider failure is suppressed.
 
 ### P1 — make the kernel a full OS kernel
 
@@ -664,26 +675,26 @@ sector and is not compatible with the compressed payload.
 
 ```
 /data/opencode/uefi-sagit/Mu-sagit.img
-  11,155,456 bytes
-  sha256 dbba476744dea098b59b12c255e8a02f5a6eda0a686d5abcb051743cfe18939e
+  11,071,488 bytes
+  sha256 b6d06dc8520f6203570663d7212ce55a31624ed274ec3d6890bc7ab485962aae
   kernel part 6,129,247 bytes (the proven sagit-uefi firmware)
-  ramdisk 5,023,744 bytes (the new LZMA payload)
+  ramdisk 4,939,776 bytes (the new LZMA payload)
 ```
 
 Payload:
 
 ```
 /data/opencode/unixnu-sagit/out/sagit-payload-volume.img.lzma
-  5,023,744 bytes
-  sha256 04129808fa6d62cb071896e906c3360cade617f2cb1a170988b3a98aafd9d883
-  sha256 (uncompressed volume) 1108b7b4f6076d7d14cb17b4c138080dcb9ffd573ee14a72701a8ff75abb90be
+  4,939,776 bytes
+  sha256 e922f7096e9c526fd5ebae2979bba800a5a55e2549135a870fe965f680437067
+  sha256 (uncompressed volume) 7da329c563338156de17eac5b559b4f6cbd8a8d16cd83e885230765147bf0dad
 ```
 
 Kernel and ADT inside the payload:
 
 ```
-kernel.stripped.macho  39,837,696 bytes
-  sha256 eab3f026eb7d0c462e3b103044a0e8ae9ca3b758cde9e8c0fc680dec54744aa7
+kernel.stripped.macho  39,559,168 bytes
+  sha256 93d8a917940d70f7a87326292efdbc37b0eb69b59f9fa29ad30da013001711ef
 kernel.macho.adt       16,616 bytes
   sha256 332e9f6bd00521a31e4c05c33724c5325e7f2d7c4a462bda1af04184a1e8ee91
 ```
@@ -700,6 +711,7 @@ The first boot after the flash should be observed for:
 - UniXNU menu and DarwinBoot (unchanged);
 - video console text, **single-spaced**;
 - no `Kernel data abort` at `IODTGetICellCounts`;
+- no `prng_random.c:267 assert(!prng_ready)` after the two corecrypto POSTs;
 - the next first-failure line, photographed or copied.
 
 Keep the previous image until the new one reaches the same point. The userdata

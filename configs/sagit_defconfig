@@ -28,7 +28,11 @@ CONFIG_XNU_NATIVE_ADRENO=n
 CONFIG_XNU_NATIVE_UFS=n
 CONFIG_XNU_NATIVE_RAM_BLOCK=n
 CONFIG_XNU_NATIVE_VIRTIO_BLOCK=n
-CONFIG_XNU_CRYPTO_BOOTSTRAP="source"
+# The iOS 16 cache ships a matching com.apple.kec.corecrypto.  Let that
+# original component initialize the kernel PRNG through real OSKext startup;
+# the source provider stays linked for kernel symbol closure but is not started
+# a second time.
+CONFIG_XNU_CRYPTO_BOOTSTRAP="prelinked"
 
 # The arch/os fragments turn the qualified NativeAES prelink closure on for
 # sheng-class boards; this storage-less bring-up has no original AES closure,

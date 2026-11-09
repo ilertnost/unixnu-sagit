@@ -64,7 +64,9 @@ tags_offset = 0x100
 # become authoritative once the common ADT generator replaces the tool.
 [payload]
 volume = "ADRENOLINE"
-size_mib = 24
+# The 20H392 prelinked kernel leaves too little room in a 24 MiB FAT volume;
+# the Mi 6 ABL accepts the 44 MiB volume once the ramdisk is LZMA-packed.
+size_mib = 44
 loader = "firmware"
 title = "Adrenoline"
 dram_size = "0xf0000000"

@@ -167,10 +167,14 @@ that `ARM_DT_PLATFORM`, `ARMCPU` and `RAM_BLOCK` expect at link time. Names in
 
 ### Result of the iOS 16 build
 
-> Current build with the `0028`/`0029` fixes (2026-11-09):
-> `.noctf` sha256 `dd233ff6bdb9a6bdccf4376e0f0e63287745cd6684c6724345eb30c84757e101`,
-> prelinked stripped kernel sha256 `eab3f026eb7d0c462e3b103044a0e8ae9ca3b758cde9e8c0fc680dec54744aa7`.
-> The block below is the original bring-up record.
+> Current build with the `0028`/`0029` fixes and the prelinked crypto startup
+> (2026-11-09):
+> `.noctf` sha256 `565c9d32b6a236c50230efb3c2b1ace7004c4ab4df80d13b291423ede6266abc`
+> (17,492,984 bytes), prelinked kernel sha256
+> `7d7ac41f3e3257303a014c91734177fc3ea205a37cbb20b9e3b690ee9358df28`
+> (45,985,792 bytes), stripped kernel sha256
+> `93d8a917940d70f7a87326292efdbc37b0eb69b59f9fa29ad30da013001711ef`
+> (39,559,168 bytes). The block below is the original bring-up record.
 
 ```
 mach.development.bcm2837.unstripped.noctf
@@ -205,11 +209,18 @@ carrying the kernel is the bulk of one. Two facts decide the layout:
 `tools/strip-prelinked-kernel.py` rewrites the file for the only consumers
 that matter: DarwinBoot reads LC_SEGMENT_64 alone, and XNU boots from memory.
 Segments are packed 4 KiB-aligned and the symbol-table commands are dropped;
-`__LINKEDIT` keeps its virtual extent with a zero file size. The prelinked
-file is 39 837 696 bytes (sha256
-`168fac2bab402e0af5ffe41b2ac947c815d72cfadba9e1a17584d7fd28ed3f64`), the
-44 MiB volume compresses to 5 023 744 bytes, and the POST HMAC is untouched
+`__LINKEDIT` keeps its virtual extent with a zero file size. The current
+prelinked file is 39 559 168 bytes (sha256
+`93d8a917940d70f7a87326292efdbc37b0eb69b59f9fa29ad30da013001711ef`), the
+44 MiB volume compresses to 4 939 776 bytes, and the POST HMAC is untouched
 (it covers the loaded `__text`).
+
+The board config uses `CONFIG_XNU_CRYPTO_BOOTSTRAP="prelinked"`. The 20H392
+cache already carries the matching `com.apple.kec.corecrypto`; the source
+corecrypto14 archive stays linked for kernel symbol closure, but its
+`source-corecrypto14-bootstrap` startup entry is compiled out. Starting both
+providers called `register_and_init_prng()` twice and tripped
+`prng_random.c:267 assert(!prng_ready)`.
 
 ### Three patches to the driver
 

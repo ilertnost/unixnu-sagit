@@ -85,6 +85,10 @@ pinned to the FAT epoch so the same inputs give the same bytes, 24 MiB by
 default. The configuration is one `xnu` entry plus `Restart` and `Power off`,
 which is what the built-in menu carries.
 
+The current sagit board sets `[payload] size_mib = 44`: the 20H392 prelinked
+kernel and its 16 KiB ADT do not fit in the 24 MiB default. The finished
+volume is still shipped as an LZMA stream, currently 4,939,776 bytes.
+
 ```sh
 python3 tools/mksagit-payload.py \
   --kernel out/sagit/tree/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837.unstripped.noctf \
@@ -120,7 +124,10 @@ the probability array from scratch.
 ## Budget
 
 The `boot` partition is 64 MiB (`BOARD_BOOTIMAGE_PARTITION_SIZE` in the
-LineageOS device tree for sagit). What is spent:
+LineageOS device tree for sagit). The table below records the earlier 24 MiB
+raw-payload experiment. The current 44 MiB volume is never placed in the boot
+image raw: the LZMA stream is 4.94 MiB and the complete image is 11.07 MiB.
+What the older layout spent:
 
 | | bytes |
 |---|---|
