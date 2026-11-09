@@ -165,14 +165,14 @@ The order matters: the namespaced corecrypto pass consumes the plain one, and
 that `ARM_DT_PLATFORM`, `ARMCPU` and `RAM_BLOCK` expect at link time. Names in
 `archives` are scripts of the build tree plus their arguments.
 
-### Result of the first complete build
+### Result of the iOS 16 build
 
 ```
 mach.development.bcm2837.unstripped.noctf
-  18 388 888 bytes
-  sha256 73bef02088a2ec0335f6b85a36aafa0d640c812576094fa6f495e641b24bd8b7
-  Mach-O 64-bit arm64, NOUNDEFS|PIE, minos 17.0
-  __TEXT at 0xfffffff007004000, 48 512 exported symbols
+  17 823 624 bytes
+  sha256 4265f1adad11f03ac228e9849e192e8c11dc7fc115846b21d3010c6d2b3a527c
+  Mach-O 64-bit arm64, NOUNDEFS|PIE, minos 16.0 (sdk 16.0)
+  __TEXT at 0xfffffff007004000, 23 023 global symbols
   _corecrypto_kext_start and _mockfs_mountroot resolved
 ```
 
@@ -188,19 +188,23 @@ carrying the kernel is the bulk of one. Two facts decide the layout:
 - `emit_prelink` preserves the original cache file layout: the whole prelink
   area rides along (222 kexts, not just the 31 selected ones) and the source
   kernel's symbol table stays in `__LINKEDIT`. The prelinked kernel is
-  therefore 56 MB even though the selected closure is 7.4 MiB — the dead
-  passengers are never instantiated (the rebuilt `__PRELINK_INFO` lists only
-  the selected components) but they occupy the file.
-- The UniXNU payload contract is an uncompressed FAT volume inside the boot
-  image, so the kernel cannot be stored compressed.
+  therefore tens of megabytes even though the selected closure is 7.4 MiB —
+  the dead passengers are never instantiated (the rebuilt `__PRELINK_INFO`
+  lists only the selected components) but they occupy the file.
+- The kernel is loaded from a FAT volume, and that volume is too large for
+  the ramdisk section uncompressed. `tools/mksagit-payload.py --lzma` wraps it
+  in a 72-byte `UNXLZMA1` header and an LZMA-alone stream;
+  `UniXNURamDiskDxe` expands it before publishing the block device, as
+  described in `docs/FIRMWARE-PAYLOAD.md`.
 
 `tools/strip-prelinked-kernel.py` rewrites the file for the only consumers
 that matter: DarwinBoot reads LC_SEGMENT_64 alone, and XNU boots from memory.
 Segments are packed 4 KiB-aligned and the symbol-table commands are dropped;
-`__LINKEDIT` keeps its virtual extent with a zero file size. 56 MB becomes
-47.3 MiB, the POST HMAC is untouched (it covers the loaded `__text`), and the
-56 MiB volume plus the gzip'd firmware leaves ~8 MiB of headroom under the
-limit.
+`__LINKEDIT` keeps its virtual extent with a zero file size. The prelinked
+file is 39 837 696 bytes (sha256
+`168fac2bab402e0af5ffe41b2ac947c815d72cfadba9e1a17584d7fd28ed3f64`), the
+44 MiB volume compresses to 5 023 744 bytes, and the POST HMAC is untouched
+(it covers the loaded `__text`).
 
 ### Three patches to the driver
 
