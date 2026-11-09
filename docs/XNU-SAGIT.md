@@ -167,6 +167,11 @@ that `ARM_DT_PLATFORM`, `ARMCPU` and `RAM_BLOCK` expect at link time. Names in
 
 ### Result of the iOS 16 build
 
+> Current build with the `0028`/`0029` fixes (2026-11-09):
+> `.noctf` sha256 `dd233ff6bdb9a6bdccf4376e0f0e63287745cd6684c6724345eb30c84757e101`,
+> prelinked stripped kernel sha256 `eab3f026eb7d0c462e3b103044a0e8ae9ca3b758cde9e8c0fc680dec54744aa7`.
+> The block below is the original bring-up record.
+
 ```
 mach.development.bcm2837.unstripped.noctf
   17 823 624 bytes
