@@ -103,6 +103,14 @@
 			#size-cells = <2>;
 			#interrupt-cells = <3>;
 			interrupt-controller;
+			/*
+			 * XNU registers interrupt parents by "AAPL,phandle", not by
+			 * the standard "phandle".  Pin both to the same value so
+			 * IODTFindInterruptParent() can resolve "interrupt-parent"
+			 * and not take a null dereference in IODTGetICellCounts().
+			 */
+			phandle = <1>;
+			AAPL,phandle = <1>;
 			reg = <0 0x17a00000 0 0x10000>, <0 0x17b00000 0 0x100000>;
 			redistributor-stride = <0 0x20000>;
 		};

@@ -260,6 +260,10 @@ def generate(dtb: Path, dram_size: int, chip_id: int, unique_chip_id: int,
         raise SystemExit(
             f"--dram-size 0x{dram_size:x} does not match the DTS window "
             f"0x{base:x}+0x{size:x}; edit memory@40000000 to change the window")
+    # XNU's IODT interrupt code registers providers by "AAPL,phandle", while
+    # the hardware DTS uses the standard "phandle".  Carry the Apple spelling
+    # through as well; the DTS pins both to the same value on the GIC node.
+    devicetree.U32.add("AAPL,phandle")
     nodes = devicetree.generate(
         dtb,
         configuration(dram_size, chip_id, unique_chip_id),

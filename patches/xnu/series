@@ -44,5 +44,7 @@
 ../0021-sagit-xnu8796-pmap-preemption.patch
 ../0023-sagit-xnu8796-cflags-extra.patch
 ../0024-sagit-xnu8796-vfs-getvfs-vfsops.patch
+../0028-sagit-panic-console-double.patch
+../0029-sagit-iodt-interrupt-null-guard.patch
 ../0007-sagit-cpu-clusters.patch
 # ../0006-sagit-boot-ladder.patch   # ported after the plain 8796 build links

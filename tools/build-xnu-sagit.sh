@@ -91,7 +91,7 @@ fi
 
 # The Mi 6 bootloader refuses boot images whose ramdisk section exceeds
 # roughly 36 MiB, so UniXNURamDiskDxe learns to expand an LZMA-alone payload.
-if ! grep -q "UNXLZMA1" "$SRC/package/UniXNUPkg/Driver/UniXNURamDiskDxe/UniXNURamDiskDxe.c"; then
+if ! grep -q "ExpandLzmaPayload" "$SRC/package/UniXNUPkg/Driver/UniXNURamDiskDxe/UniXNURamDiskDxe.c"; then
   git -C "$SRC" apply "$PATCHES/0027-unixnu-ramdisk-lzma.patch"
 fi
 

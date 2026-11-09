@@ -1,0 +1,50 @@
+diff --git a/osfmk/kern/printf.c b/osfmk/kern/printf.c
+index e44008f..32c5ab5 100644
+--- a/osfmk/kern/printf.c
++++ b/osfmk/kern/printf.c
+@@ -908,6 +908,23 @@ vprintf(const char *fmt, va_list ap)
+ 	return vprintf_internal(fmt, ap, __builtin_return_address(0));
+ }
+ 
++/*
++ * sagit: on a board with no enumerated serial port, PE_init_kprintf() falls
++ * back to console_write_unbuffered(), which is the video console.  The
++ * console has already received this byte through console_write_char() /
++ * console_write_unbuffered() above, so calling PE_kputc() a second time
++ * prints every panic and kdb character twice.  Only mirror to PE_kputc when
++ * it is a real serial backend.
++ */
++static inline void
++consdebug_serial_mirror(char c)
++{
++	if (!console_is_serial() && !disable_serial_output &&
++	    PE_kputc != console_write_unbuffered) {
++		PE_kputc(c);
++	}
++}
++
+ void
+ consdebug_putc(char c)
+ {
+@@ -917,9 +934,7 @@ consdebug_putc(char c)
+ 
+ 	debug_putc(c);
+ 
+-	if (!console_is_serial() && !disable_serial_output) {
+-		PE_kputc(c);
+-	}
++	consdebug_serial_mirror(c);
+ }
+ 
+ void
+@@ -931,9 +946,7 @@ consdebug_putc_unbuffered(char c)
+ 
+ 	debug_putc(c);
+ 
+-	if (!console_is_serial() && !disable_serial_output) {
+-		PE_kputc(c);
+-	}
++	consdebug_serial_mirror(c);
+ }
+ 
+ void

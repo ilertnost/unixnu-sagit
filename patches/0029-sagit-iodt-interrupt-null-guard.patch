@@ -1,0 +1,25 @@
+diff --git a/iokit/Kernel/IODeviceTreeSupport.cpp b/iokit/Kernel/IODeviceTreeSupport.cpp
+index b69f9d5..2034a8d 100644
+--- a/iokit/Kernel/IODeviceTreeSupport.cpp
++++ b/iokit/Kernel/IODeviceTreeSupport.cpp
+@@ -575,6 +575,20 @@ static void
+ IODTGetICellCounts( IORegistryEntry * regEntry,
+     UInt32 * iCellCount, UInt32 * aCellCount)
+ {
++	/*
++	 * sagit: a non-Apple device tree can advertise an "interrupts"
++	 * property before its interrupt-parent graph is complete.  The original
++	 * code dereferences regEntry unconditionally and takes a data abort in
++	 * IODTGetICellCounts when FindPHandle() did not resolve the parent.
++	 * Treat a missing parent as a provider with no address cells and the
++	 * traditional one-cell interrupt specifier; IODTMapOneInterrupt() then
++	 * stops at the missing parent instead of panicking.
++	 */
++	if (regEntry == NULL) {
++		*iCellCount = 1;
++		*aCellCount = 0;
++		return;
++	}
+ 	if (!GetUInt32( regEntry, gIODTInterruptCellKey, iCellCount)) {
+ 		unexpected( *iCellCount = 1 );
+ 	}
