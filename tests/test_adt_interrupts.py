@@ -11,6 +11,10 @@ up "interrupt-parent" with FindPHandle().  The hardware DTS uses the standard
 Without it, FindPHandle() returns NULL and IODTGetICellCounts() dereferences
 it: the boot panic at pc 0xfffffff0078d3114 (IODTGetICellCounts + 0x2c).
 
+The GIC node also has to carry the Apple value
+`interrupt-controller = "master"`; XNU's pe_arm_map_interrupt_controller()
+searches for that value, not the Linux empty flag.
+
 The test builds the real tree; it skips when dtc or the UniXNU converter is
 not available, because those are build-host inputs rather than repository
 files.
@@ -56,6 +60,13 @@ class AdtInterruptContractTest(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             root = adtinfo.read_adt(output.read_bytes())
+
+        intc = next((node for node in root.walk() if node.name == "intc"), None)
+        self.assertIsNotNone(intc, "the ADT has no intc node")
+        controller = intc.get("interrupt-controller")
+        self.assertIsNotNone(controller, "intc has no interrupt-controller")
+        self.assertEqual(controller.value, b"master\0",
+                         "XNU looks up the value 'master', not an empty flag")
 
         by_aapl_handle = {}
         for node in root.walk():

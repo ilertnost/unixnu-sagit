@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
 // MSM8998 topology, written for this port.
 //
 // The Mi 6 uses a 4+4 big.LITTLE arrangement: four Cortex-A53 cores at
@@ -102,7 +104,14 @@
 			#address-cells = <2>;
 			#size-cells = <2>;
 			#interrupt-cells = <3>;
-			interrupt-controller;
+			/*
+			 * XNU's pe_arm_map_interrupt_controller() does
+			 * SecureDTFindEntry("interrupt-controller", "master"),
+			 * so the Apple ADT needs the string value.  The Linux
+			 * binding normally uses an empty flag; make-sagit-adt.py
+			 * teaches the converter that this property is a string.
+			 */
+			interrupt-controller = "master";
 			/*
 			 * XNU registers interrupt parents by "AAPL,phandle", not by
 			 * the standard "phandle".  Pin both to the same value so

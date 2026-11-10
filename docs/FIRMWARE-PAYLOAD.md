@@ -87,7 +87,7 @@ which is what the built-in menu carries.
 
 The current sagit board sets `[payload] size_mib = 44`: the 20H392 prelinked
 kernel and its 16 KiB ADT do not fit in the 24 MiB default. The finished
-volume is still shipped as an LZMA stream, currently 4,939,776 bytes.
+volume is still shipped as an LZMA stream, currently 4,943,872 bytes.
 
 ```sh
 python3 tools/mksagit-payload.py \

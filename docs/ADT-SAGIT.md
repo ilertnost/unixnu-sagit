@@ -127,16 +127,16 @@ Output of the sample run:
 
 ```
 ADT: out/adt/kernel.macho.adt
-  bytes: 16576
-  sha256: 58fb1182c19d11942c0fb8a14f790f33d01ef70a451132cf24057459a19720c6
+  bytes: 16624
+  sha256: 68b5a22a15cca9225842c611199a7f5a81795a9ee1ccd9b0b59a5602c142123b
   dram: 0x40000000 + 0xf0000000
   chip-id: 0x00008015
   unique-chip-id: 0x0123456789abcdef
   hardware dtb: out/adt/hardware.dtb
 ```
 
-`hardware.dtb` is 2853 bytes, SHA-256
-`dc3fbb1656fddbb94f41893b0b939002980aabea5882d824db74020b55b351bf`.
+`hardware.dtb` is 2890 bytes, SHA-256
+`a42d5a55c687735f5085aa1379ddd4aba7395bc59c040c5bbb950823d4951c05`.
 
 ## What the generator actually emits
 
@@ -158,7 +158,7 @@ device-tree
 ## Shape comparison with `d20ap.adt`
 
 The real iPhone10,1 ADT is 185084 bytes and parses exactly to EOF; ours is
-16576 bytes. The difference is not a bug: Apple's tree describes a whole
+16624 bytes. The difference is not a bug: Apple's tree describes a whole
 phone, ours only what the current kernel can use.
 
 | item | `d20ap.adt` (20H392) | sagit ADT |
@@ -167,7 +167,7 @@ phone, ours only what the current kernel can use.
 | CPU nodes | 6 (2 P + 4 E) | 8 (4 E A53 + 4 P A73) |
 | `/chosen` properties | 72 | 50 |
 | `/arm-io` children | 82 | 2 (`intc`, `timer`) |
-| `AAPL,phandle` | root, `/chosen`, `/arm-io` | absent |
+| `AAPL,phandle` | root, `/chosen`, `/arm-io` | `intc` only |
 | root hardware nodes (`backlight`, `baseband`, `sacm`, ports) | present | absent |
 | `/aliases`, `/memory`, `/pram`, `/vram`, `/filesystems`, `/osenvironments` | present | absent |
 | `/psci` | absent | present (SMC) |
@@ -192,6 +192,18 @@ them. They do carry `reg` translated into the `arm-io` `ranges` window, which
 starts at the lowest exported register rounded down to 16 MiB — here
 `0x17000000`, size `0x01000000`. The GIC entry therefore appears at offset
 `0xA00000`, and its phandle is preserved for the timer's `interrupt-parent`.
+
+## Interrupt controller value
+
+Linux's FDT binding treats `interrupt-controller` as an empty flag. Apple's
+ADT and XNU 8796 do not: `pe_arm_map_interrupt_controller()` calls
+`SecureDTFindEntry("interrupt-controller", "master", ...)`, so the property
+must carry the string `"master"`. The shared converter normally emits an empty
+flag; `make-sagit-adt.py` removes the property from the converter's `FLAGS`
+set and adds it to `STRINGS`, and the GIC node in
+`soc/msm8998/dts/msm8998.dtsi` carries the matching value. The regression test
+`tests/test_adt_interrupts.py` checks both this value and the `AAPL,phandle`
+references.
 
 ## Validation performed
 

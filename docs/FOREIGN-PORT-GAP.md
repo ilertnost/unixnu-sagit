@@ -570,7 +570,7 @@ XNU registers interrupt parents by `AAPL,phandle` (`gIODTPHandleKey`), but our
 ADT had only `phandle = 1`, so `FindPHandle(1)` returned NULL and
 `IODTGetICellCounts(NULL, ...)` data-aborted.
 
-Two fixes:
+Three fixes:
 
 1. `soc/msm8998/dts/msm8998.dtsi` now emits both `phandle = <1>` and
    `AAPL,phandle = <1>` for the GIC; `tools/make-sagit-adt.py` adds
@@ -580,8 +580,14 @@ Two fixes:
    `IODTGetICellCounts(NULL, ...)` return one interrupt cell and zero address
    cells instead of dereferencing NULL. This is a safety net for any other
    node with an incomplete parent graph.
+3. The GIC node now emits `interrupt-controller = "master"` and
+   `make-sagit-adt.py` treats that property as a string instead of the
+   converter's empty FDT flag. `pe_arm_map_interrupt_controller()` looks up
+   exactly that value; with an empty flag it prints
+   `failed to find the interrupt-controller` and returns 0.
 
-Regression test: `tests/test_adt_interrupts.py` (passes).
+Regression test: `tests/test_adt_interrupts.py` (passes; it checks both the
+`AAPL,phandle` graph and the `"master"` controller value).
 
 ---
 
@@ -616,7 +622,7 @@ then KeyStore. Do not add all 11 at once.
 
 ### P0 — flash the current fix and learn the next wall
 
-1. Flash `Mu-sagit.img` (sha256 `b6d06dc8520f6203570663d7212ce55a31624ed274ec3d6890bc7ab485962aae`).
+1. Flash `Mu-sagit.img` (sha256 `6a4aea3ab7db103f43b5c386ca0e669b7181b276a551dbddd92fbedcf00db631`).
 2. Verify the panic screen is single-spaced, the `IODTGetICellCounts` panic
    is gone, and `prng_random.c:267 assert(!prng_ready)` is gone.
 3. Capture the next panic/first failure. Likely candidates: PMGR/AMFI (if the
@@ -675,19 +681,19 @@ sector and is not compatible with the compressed payload.
 
 ```
 /data/opencode/uefi-sagit/Mu-sagit.img
-  11,071,488 bytes
-  sha256 b6d06dc8520f6203570663d7212ce55a31624ed274ec3d6890bc7ab485962aae
+  11,075,584 bytes
+  sha256 6a4aea3ab7db103f43b5c386ca0e669b7181b276a551dbddd92fbedcf00db631
   kernel part 6,129,247 bytes (the proven sagit-uefi firmware)
-  ramdisk 4,939,776 bytes (the new LZMA payload)
+  ramdisk 4,943,872 bytes (the new LZMA payload)
 ```
 
 Payload:
 
 ```
 /data/opencode/unixnu-sagit/out/sagit-payload-volume.img.lzma
-  4,939,776 bytes
-  sha256 e922f7096e9c526fd5ebae2979bba800a5a55e2549135a870fe965f680437067
-  sha256 (uncompressed volume) 7da329c563338156de17eac5b559b4f6cbd8a8d16cd83e885230765147bf0dad
+  4,943,872 bytes
+  sha256 005d8cede15aa823a04a231ae5a899a58a2b61a24094deacd21a55868d6280dd
+  sha256 (uncompressed volume) d28f775ba46fdaaaf232cb7113fc0ad3074df0b5fb7f97a34af9fb1987205953
 ```
 
 Kernel and ADT inside the payload:
@@ -695,8 +701,18 @@ Kernel and ADT inside the payload:
 ```
 kernel.stripped.macho  39,559,168 bytes
   sha256 93d8a917940d70f7a87326292efdbc37b0eb69b59f9fa29ad30da013001711ef
-kernel.macho.adt       16,616 bytes
-  sha256 332e9f6bd00521a31e4c05c33724c5325e7f2d7c4a462bda1af04184a1e8ee91
+kernel.macho.adt       16,624 bytes
+  sha256 68b5a22a15cca9225842c611199a7f5a81795a9ee1ccd9b0b59a5602c142123b
+  (the ADT random seed is fresh on every regeneration)
+```
+
+The separate diagnostic image with no UniXNU loader or payload is:
+
+```
+/data/opencode/uefi-sagit/Mu-sagit-bare.img
+  6,086,656 bytes
+  sha256 34ed59b222e47b67b41344e0f79202edc84c53235a206139301c4bf41a3f680d
+  ramdisk 0 bytes, no UniXNU/UniXNUDxe/UniXNURamDiskDxe/DarwinBoot
 ```
 
 Flash:
@@ -711,6 +727,7 @@ The first boot after the flash should be observed for:
 - UniXNU menu and DarwinBoot (unchanged);
 - video console text, **single-spaced**;
 - no `Kernel data abort` at `IODTGetICellCounts`;
+- no `pe_arm_map_interrupt_controller: failed to find the interrupt-controller.`;
 - no `prng_random.c:267 assert(!prng_ready)` after the two corecrypto POSTs;
 - the next first-failure line, photographed or copied.
 

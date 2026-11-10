@@ -264,6 +264,12 @@ def generate(dtb: Path, dram_size: int, chip_id: int, unique_chip_id: int,
     # the hardware DTS uses the standard "phandle".  Carry the Apple spelling
     # through as well; the DTS pins both to the same value on the GIC node.
     devicetree.U32.add("AAPL,phandle")
+    # pe_arm_map_interrupt_controller() looks up the property value "master",
+    # not the Linux FDT boolean flag.  The shared converter normally emits
+    # "interrupt-controller" as an empty flag; treat it as a string for this
+    # Apple tree.  The DTS carries the matching "master" value.
+    devicetree.FLAGS.discard("interrupt-controller")
+    devicetree.STRINGS.add("interrupt-controller")
     nodes = devicetree.generate(
         dtb,
         configuration(dram_size, chip_id, unique_chip_id),
